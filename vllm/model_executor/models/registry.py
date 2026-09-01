@@ -89,7 +89,12 @@ _SEQUENCE_CLASSIFICATION_MODELS: _ModelMap = {}
 
 _MULTIMODAL_MODELS: _ModelMap = {}
 
-_SPECULATIVE_DECODING_MODELS: _ModelMap = {}
+_SPECULATIVE_DECODING_MODELS: _ModelMap = {
+    "DeepSeekMTPModel": ("deepseek_mtp", "DeepSeekMTP"),
+    "EagleDeepSeekMTPModel": ("deepseek_eagle", "EagleDeepseekV3ForCausalLM"),
+    "Eagle3DeepseekV2ForCausalLM": ("deepseek_eagle3", "Eagle3DeepseekV2ForCausalLM"),
+    "Eagle3DeepseekV3ForCausalLM": ("deepseek_eagle3", "Eagle3DeepseekV2ForCausalLM"),
+}
 
 _TRANSFORMERS_SUPPORTED_MODELS: _ModelMap = {}
 

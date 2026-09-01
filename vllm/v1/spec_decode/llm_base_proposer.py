@@ -29,6 +29,7 @@ from vllm.model_executor.models import (
     supports_multimodal,
     supports_multimodal_embeddings,
 )
+from vllm.model_executor.models.deepseek_eagle3 import Eagle3DeepseekV2ForCausalLM
 from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.platforms import current_platform
@@ -516,6 +517,7 @@ class SpecDecodeBaseProposer:
             model = self.model
             if isinstance(model, BreakableCUDAGraphWrapper):
                 model = model.unwrap()
+            assert isinstance(model, Eagle3DeepseekV2ForCausalLM)
             target_hidden_states = self.model.combine_hidden_states(
                 target_hidden_states
             )
