@@ -26,7 +26,6 @@ from vllm.v1.executor.multiproc_executor import MultiprocExecutor
 from vllm.v1.metrics.prometheus import setup_multiprocess_prometheus
 from vllm.v1.utils import (
     APIServerProcessManager,
-    RustFrontendProcessManager,
     wait_for_completion_or_failure,
 )
 
@@ -57,10 +56,6 @@ class ServeSubcommand(CLISubcommand):
 
             uvloop.run(serve_grpc(args))
             return
-
-        rust_frontend_path = (
-            envs.VLLM_RUST_FRONTEND_PATH if envs.VLLM_USE_RUST_FRONTEND else None
-        )
 
         if args.headless:
             if args.api_server_count is not None and args.api_server_count > 0:
@@ -107,7 +102,7 @@ class ServeSubcommand(CLISubcommand):
         # - Hybrid LB: Use local DP size (internal LB for local ranks only)
         # - Internal LB: Use full DP size
         if args.api_server_count is None:
-            if is_multi_port or is_external_lb or rust_frontend_path:
+            if is_multi_port or is_external_lb:
                 args.api_server_count = 1
             elif is_hybrid_lb:
                 args.api_server_count = args.data_parallel_size_local or 1
@@ -124,12 +119,6 @@ class ServeSubcommand(CLISubcommand):
                         "Defaulting api_server_count to data_parallel_size (%d).",
                         args.api_server_count,
                     )
-        elif rust_frontend_path and args.api_server_count > 1:
-            logger.warning(
-                "Ignoring --api-server-count=%d when using rust front-end process",
-                args.api_server_count,
-            )
-            args.api_server_count = 1
 
         # Elastic EP currently only supports running with at most one API server.
         if getattr(args, "enable_elastic_ep", False) and args.api_server_count > 1:
@@ -144,7 +133,7 @@ class ServeSubcommand(CLISubcommand):
             run_dp_supervisor(args)
         elif args.api_server_count < 1:
             run_headless(args)
-        elif args.api_server_count > 1 or rust_frontend_path:
+        elif args.api_server_count > 1:
             run_multi_api_server(args)
         else:
             # Single API server (this process).
@@ -260,16 +249,8 @@ def run_headless(args: argparse.Namespace):
 
 def run_multi_api_server(args: argparse.Namespace):
     assert not args.headless
-    rust_frontend_path = (
-        envs.VLLM_RUST_FRONTEND_PATH if envs.VLLM_USE_RUST_FRONTEND else None
-    )
     num_api_servers: int = args.api_server_count
     assert num_api_servers > 0
-
-    if rust_frontend_path and num_api_servers > 1:
-        raise ValueError(
-            "VLLM_RUST_FRONTEND_PATH does not support api_server_count > 1"
-        )
 
     if num_api_servers > 1:
         setup_multiprocess_prometheus()
@@ -308,22 +289,18 @@ def run_multi_api_server(args: argparse.Namespace):
     dp_rank = parallel_config.data_parallel_rank
     assert parallel_config.local_engines_only or dp_rank == 0
 
-    api_server_manager: APIServerProcessManager | RustFrontendProcessManager | None = (
-        None
-    )
+    api_server_manager: APIServerProcessManager | None = None
 
     from vllm.v1.engine.utils import get_engine_zmq_addresses
 
     # Defer port allocation to the child's bind() to avoid TOCTOU, except
-    # for Rust front-end and Ray DP, which can't see the post-bind rebind
-    # (CLI-arg subprocess / pickled-into-actor snapshot respectively) and
-    # so pre-allocate driver-side -- reintroducing the original race only
-    # there.
+    # for Ray DP, which can't see the post-bind rebind (pickled-into-actor
+    # snapshot) and so pre-allocates driver-side.
     is_ray_dp = parallel_config.data_parallel_backend == "ray"
     addresses = get_engine_zmq_addresses(
         vllm_config,
         num_api_servers,
-        defer_api_server_ports=not (rust_frontend_path or is_ray_dp),
+        defer_api_server_ports=not is_ray_dp,
     )
 
     with launch_core_engines(
@@ -336,47 +313,25 @@ def run_multi_api_server(args: argparse.Namespace):
             coordinator.get_stats_publish_address() if coordinator else None
         )
 
-        if rust_frontend_path:
-            if parallel_config.local_engines_only:
-                expected_engine_start_index = parallel_config.data_parallel_rank
-                expected_engine_count = parallel_config.data_parallel_size_local
-            else:
-                expected_engine_start_index = 0
-                expected_engine_count = parallel_config.data_parallel_size
-            # Start rust front-end process.
-            api_server_manager = RustFrontendProcessManager(
-                binary_path=rust_frontend_path,
-                sock=sock,
-                args=args,
-                input_address=addresses.inputs[0],
-                output_address=addresses.outputs[0],
-                engine_start_index=expected_engine_start_index,
-                engine_count=expected_engine_count,
-                data_parallel_size=parallel_config.data_parallel_size,
-                stats_update_address=stats_update_address,
-            )
-        else:
-            # Start API server(s).
-            api_server_manager = APIServerProcessManager(
-                listen_address=listen_address,
-                sock=sock,
-                args=args,
-                num_servers=num_api_servers,
-                input_addresses=addresses.inputs,
-                output_addresses=addresses.outputs,
-                stats_update_address=stats_update_address,
-                tensor_queue=engine_launch.tensor_queue,
-            )
+        # Start API server(s).
+        api_server_manager = APIServerProcessManager(
+            listen_address=listen_address,
+            sock=sock,
+            args=args,
+            num_servers=num_api_servers,
+            input_addresses=addresses.inputs,
+            output_addresses=addresses.outputs,
+            stats_update_address=stats_update_address,
+            tensor_queue=engine_launch.tensor_queue,
+        )
 
-            if not is_ray_dp:
-                # Forward each child's bound endpoints to the engine handshake
-                # (runs on ``with`` exit). Skipped for Ray DP, where addresses
-                # are pre-allocated above and Ray actors already hold them.
-                actual_inputs, actual_outputs = (
-                    api_server_manager.gather_actual_addresses()
-                )
-                addresses.inputs = actual_inputs
-                addresses.outputs = actual_outputs
+        if not is_ray_dp:
+            # Forward each child's bound endpoints to the engine handshake
+            # (runs on ``with`` exit). Skipped for Ray DP, where addresses
+            # are pre-allocated above and Ray actors already hold them.
+            actual_inputs, actual_outputs = api_server_manager.gather_actual_addresses()
+            addresses.inputs = actual_inputs
+            addresses.outputs = actual_outputs
 
         # Set frontend processes to watch during engine startup.
         # If any of these processes exit before the engines are up, the engine startup
