@@ -831,7 +831,7 @@ def test_model_class_overrides_registers_target():
     from vllm.model_executor.models import ModelRegistry
 
     arch = "_TestModelClassOverrideArch"
-    target = "vllm.model_executor.models.llama:LlamaForCausalLM"
+    target = "vllm.model_executor.models.deepseek_v2:DeepseekV2ForCausalLM"
     assert arch not in ModelRegistry.models
 
     model_config = ModelConfig(
@@ -842,8 +842,8 @@ def test_model_class_overrides_registers_target():
         # Accessing `.registry` is the chokepoint that applies the overrides;
         # it has already run during construction.
         registered = model_config.registry.models[arch]
-        assert registered.module_name == "vllm.model_executor.models.llama"
-        assert registered.class_name == "LlamaForCausalLM"
+        assert registered.module_name == "vllm.model_executor.models.deepseek_v2"
+        assert registered.class_name == "DeepseekV2ForCausalLM"
         # Idempotent: a second access does not re-register or error out.
         assert model_config.registry.models[arch] is registered
     finally:
