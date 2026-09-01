@@ -85,7 +85,6 @@ from vllm.v1.worker.utils import is_residual_scattered_for_sp
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
-from ...model_executor.model_loader import TensorizerLoader
 from .gpu.warmup import warmup_kernels
 from .utils import request_memory
 
@@ -103,7 +102,6 @@ def _num_workspace_lanes(vllm_config: VllmConfig, use_v2_model_runner: bool) -> 
 
 if TYPE_CHECKING:
     from vllm.device_allocator.sleep_mode_backend import SleepModeBackend
-    from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
     from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
 
@@ -1233,20 +1231,8 @@ class Worker(WorkerBase):
         pattern: str | None = None,
         max_size: int | None = None,
     ) -> None:
-        from vllm.model_executor.model_loader import ShardedStateLoader
-
-        ShardedStateLoader.save_model(
-            self.model_runner.model,
-            path,
-            pattern=pattern,
-            max_size=max_size,
-        )
-
-    def save_tensorized_model(self, tensorizer_config: "TensorizerConfig") -> None:
-        TensorizerLoader.save_model(
-            self.get_model(),
-            tensorizer_config=tensorizer_config,
-            model_config=self.model_config,
+        raise NotImplementedError(
+            "save_sharded_state is not supported in this focused build."
         )
 
     def _check_weight_transfer_engine(self) -> None:

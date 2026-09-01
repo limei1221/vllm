@@ -15,10 +15,8 @@ SafetensorsLoadStrategy: TypeAlias = Literal["lazy", "eager", "prefetch", "torch
 
 if TYPE_CHECKING:
     from vllm.model_executor.model_loader import LoadFormats
-    from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
 else:
     LoadFormats = str
-    TensorizerConfig = Any
 
 logger = init_logger(__name__)
 
@@ -27,34 +25,10 @@ logger = init_logger(__name__)
 class LoadConfig:
     """Configuration for loading the model weights."""
 
-    load_format: str | LoadFormats = "auto"
+    load_format: str | LoadFormats = "safetensors"
     """
-    The format of the model weights to load.
-
-    - "auto" will try to load the weights in the safetensors format and fall
-      back to the pytorch bin format if safetensors format is not available.
-    - "pt" will load the weights in the pytorch bin format.
-    - "safetensors" will load the weights in the safetensors format.
-    - "instanttensor" will load the Safetensors weights on CUDA devices using
-      InstantTensor, which enables distributed loading with pipelined prefetching
-      and fast direct I/O.
-    - "npcache" will load the weights in pytorch format and store a numpy cache
-      to speed up the loading.
-    - "dummy" will initialize the weights with random values, which is mainly
-      for profiling.
-    - "tensorizer" will use CoreWeave's tensorizer library for fast weight
-      loading. See the Tensorize vLLM Model script in the Examples section for
-      more information.
-    - "runai_streamer" will load the Safetensors weights using Run:ai Model
-      Streamer.
-    - "runai_streamer_sharded" will load weights from pre-sharded checkpoint
-      files using Run:ai Model Streamer.
-    - "sharded_state" will load weights from pre-sharded checkpoint files,
-      supporting efficient loading of tensor-parallel models.
-    - "mistral" will load weights from consolidated safetensors files used by
-      Mistral models.
-    - "modelexpress" will load weights using ModelExpress.
-    - Other custom values can be supported via plugins.
+    The format of the model weights to load. This focused build only
+    supports the "safetensors" format.
     """
     download_dir: str | None = None
     """Directory to download and load the weights, default to the default
@@ -133,7 +107,13 @@ class LoadConfig:
 
     @field_validator("load_format", mode="after")
     def _lowercase_load_format(cls, load_format: str) -> str:
-        return load_format.lower()
+        load_format = load_format.lower()
+        if load_format != "safetensors":
+            raise ValueError(
+                f"This focused build only supports safetensors load format, "
+                f"got {load_format!r}."
+            )
+        return load_format
 
     @field_validator("ignore_patterns", mode="after")
     def _validate_ignore_patterns(

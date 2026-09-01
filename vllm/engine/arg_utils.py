@@ -1804,19 +1804,8 @@ class EngineArgs:
                 )
 
     def create_load_config(self) -> LoadConfig:
-        if self.load_format == "tensorizer":
-            if hasattr(self.model_loader_extra_config, "to_serializable"):
-                self.model_loader_extra_config = (
-                    self.model_loader_extra_config.to_serializable()
-                )
-            self.model_loader_extra_config["tensorizer_config"] = {}
-            self.model_loader_extra_config["tensorizer_config"]["tensorizer_dir"] = (
-                self.model
-            )
-            self.validate_tensorizer_args()
-
         return LoadConfig(
-            load_format=self.load_format,
+            load_format="safetensors",
             download_dir=self.download_dir,
             safetensors_load_strategy=self.safetensors_load_strategy,
             safetensors_prefetch_num_threads=self.safetensors_prefetch_num_threads,

@@ -18,10 +18,6 @@ from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig,
     QuantizeMethodBase,
 )
-from vllm.model_executor.model_loader.reload import (
-    record_metadata_for_reloading,
-    set_torchao_reload_attrs,
-)
 from vllm.model_executor.models.interfaces import SupportsQuant
 from vllm.tracing import instrument
 from vllm.utils.mem_utils import release_device_memory_under_pressure
@@ -29,6 +25,16 @@ from vllm.utils.platform_utils import is_pin_memory_available
 from vllm.utils.torch_utils import get_accelerator_view_from_cpu_tensor
 
 logger = init_logger(__name__)
+
+
+def record_metadata_for_reloading(_model: nn.Module) -> None:
+    """No-op stub for removed reload functionality."""
+    pass
+
+
+def set_torchao_reload_attrs(_model: nn.Module, _model_config: ModelConfig) -> None:
+    """No-op stub for removed reload functionality."""
+    pass
 
 
 @instrument(span_name="Initialize model")
