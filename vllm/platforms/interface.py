@@ -430,6 +430,14 @@ class Platform:
         return None
 
     @classmethod
+    def verify_hopper(cls) -> None:
+        """Raise RuntimeError unless the current device is NVIDIA Hopper SM90.
+
+        The focused build overrides this on the CUDA platform.
+        """
+        pass
+
+    @classmethod
     def has_device_capability(
         cls,
         capability: tuple[int, int] | int,

@@ -2487,6 +2487,15 @@ class EngineArgs:
         if self.kda_prefill_backend is not None:
             self.additional_config["kda_prefill_backend"] = self.kda_prefill_backend
 
+        current_platform.verify_hopper()
+        available_gpus = current_platform.device_count()
+        required_gpus = parallel_config.local_gpu_count
+        if available_gpus < required_gpus:
+            raise ValueError(
+                f"This focused build requires {required_gpus} local GPU(s) "
+                f"(TP*PP*PCP*DP), but only {available_gpus} are available."
+            )
+
         config = VllmConfig(
             model_config=model_config,
             cache_config=cache_config,

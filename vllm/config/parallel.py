@@ -551,6 +551,16 @@ class ParallelConfig:
         return self.world_size * self.data_parallel_size
 
     @property
+    def local_gpu_count(self) -> int:
+        """Number of local GPUs required: TP * PP * PCP * DP."""
+        return (
+            self.tensor_parallel_size
+            * self.pipeline_parallel_size
+            * self.prefill_context_parallel_size
+            * self.data_parallel_size
+        )
+
+    @property
     def use_ubatching(self) -> bool:
         return self.enable_dbo or self.ubatch_size > 1
 
@@ -829,6 +839,34 @@ class ParallelConfig:
         return hash_factors(factors)
 
     def __post_init__(self) -> None:
+        if self.nnodes != 1:
+            raise ValueError(
+                f"This focused build requires a single node, got nnodes={self.nnodes}."
+            )
+        if self.distributed_executor_backend in ("external_launcher", "ray") or (
+            isinstance(self.distributed_executor_backend, type)
+            and getattr(self.distributed_executor_backend, "uses_ray", False)
+        ):
+            raise ValueError(
+                "This focused build does not support external launchers or Ray."
+            )
+        if self.enable_elastic_ep:
+            raise ValueError(
+                "This focused build does not support elastic expert parallelism."
+            )
+        if self.enable_eplb:
+            raise ValueError("This focused build does not support EPLB.")
+        if self.data_parallel_external_lb or self.data_parallel_hybrid_lb:
+            raise ValueError(
+                "This focused build does not support external or hybrid DP load balancing."
+            )
+        if self.all2all_backend not in ("allgather_reducescatter",):
+            raise ValueError(
+                f"This focused build only supports the "
+                f"allgather_reducescatter all2all backend, got "
+                f"{self.all2all_backend}."
+            )
+
         # Continue with the rest of the initialization
         self.world_size = (
             self.pipeline_parallel_size

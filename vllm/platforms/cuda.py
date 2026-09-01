@@ -307,6 +307,16 @@ class CudaPlatformBase(Platform):
         return True
 
     @classmethod
+    def verify_hopper(cls) -> None:
+        """Raise RuntimeError unless the current device is NVIDIA Hopper SM90."""
+        capability = cls.get_device_capability()
+        if capability != DeviceCapability(9, 0):
+            raise RuntimeError(
+                f"This focused vLLM build requires NVIDIA Hopper SM90; "
+                f"got {capability}."
+            )
+
+    @classmethod
     def check_and_update_config(cls, vllm_config: VllmConfig) -> None:
         parallel_config = vllm_config.parallel_config
         model_config = vllm_config.model_config
