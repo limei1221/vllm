@@ -9,58 +9,21 @@ purposes.
 import argparse
 import json
 import ssl
-from collections.abc import Sequence
 from dataclasses import field
 from typing import Any, Literal
 
 import vllm.envs as envs
 from vllm.config import config
-from vllm.engine.arg_utils import AsyncEngineArgs, optional_type
+from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.entrypoints.chat_utils import (
     ChatTemplateContentFormatOption,
     validate_chat_template,
 )
-from vllm.entrypoints.openai.models.protocol import LoRAModulePath
 from vllm.entrypoints.serve.utils.constants import (
     H11_MAX_HEADER_COUNT_DEFAULT,
     H11_MAX_INCOMPLETE_EVENT_SIZE_DEFAULT,
 )
-from vllm.tool_parsers import ToolParserManager
 from vllm.utils.argparse_utils import FlexibleArgumentParser
-
-
-class LoRAParserAction(argparse.Action):
-    def __call__(
-        self,
-        parser: argparse.ArgumentParser,
-        namespace: argparse.Namespace,
-        values: str | Sequence[str] | None,
-        option_string: str | None = None,
-    ):
-        if values is None:
-            values = []
-        if isinstance(values, str):
-            raise TypeError("Expected values to be a list")
-
-        lora_list: list[LoRAModulePath] = []
-        for item in values:
-            if item in [None, ""]:  # Skip if item is None or empty string
-                continue
-            if "=" in item and "," not in item:  # Old format: name=path
-                name, path = item.split("=")
-                lora_list.append(LoRAModulePath(name, path))
-            else:  # Assume JSON format
-                try:
-                    lora_dict = json.loads(item)
-                    lora = LoRAModulePath(**lora_dict)
-                    lora_list.append(lora)
-                except json.JSONDecodeError:
-                    parser.error(f"Invalid JSON format for --lora-modules: {item}")
-                except TypeError as e:
-                    parser.error(
-                        f"Invalid fields for --lora-modules: {item} - {str(e)}"
-                    )
-        setattr(namespace, self.dest, lora_list)
 
 
 @config
@@ -72,11 +35,6 @@ class BaseFrontendArgs:
     the subclasses.
     """
 
-    lora_modules: list[LoRAModulePath] | None = None
-    """LoRA modules configurations in either 'name=path' format or JSON format
-    or JSON list format. Example (old format): `'name=path'` Example (new
-    format): `{\"name\": \"name\", \"path\": \"lora_path\",
-    \"base_model_name\": \"id\"}`"""
     chat_template: str | None = None
     """The file path to the chat template, or the template in single-line form
     for the specified model."""
@@ -200,17 +158,6 @@ class BaseFrontendArgs:
         # Special case: default_chat_template_kwargs needs json.loads type
         frontend_kwargs["default_chat_template_kwargs"]["type"] = json.loads
 
-        # Special case: LoRA modules need custom parser action and
-        # optional_type(str)
-        frontend_kwargs["lora_modules"]["type"] = optional_type(str)
-        frontend_kwargs["lora_modules"]["action"] = LoRAParserAction
-
-        # Special case: Tool call parser shows built-in options.
-        valid_tool_parsers = list(ToolParserManager.list_registered())
-        parsers_str = ",".join(valid_tool_parsers)
-        frontend_kwargs["tool_call_parser"]["metavar"] = (
-            f"{{{parsers_str}}} or name registered in --tool-parser-plugin"
-        )
         return frontend_kwargs
 
     @classmethod

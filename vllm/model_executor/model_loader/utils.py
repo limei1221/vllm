@@ -86,8 +86,6 @@ def initialize_model(
         kwargs["cache_config"] = vllm_config.cache_config
     if "quant_config" in all_params:
         kwargs["quant_config"] = vllm_config.quant_config
-    if "lora_config" in all_params:
-        kwargs["lora_config"] = vllm_config.lora_config
     if "scheduler_config" in all_params:
         kwargs["scheduler_config"] = vllm_config.scheduler_config
     with set_current_vllm_config(vllm_config, check_compile=True, prefix=prefix):
@@ -191,7 +189,6 @@ _MODEL_ARCH_BY_HASH = dict[int, tuple[type[nn.Module], str]]()
 
 
 def _get_model_architecture(model_config: ModelConfig) -> tuple[type[nn.Module], str]:
-
     architectures = getattr(model_config.hf_config, "architectures", None) or []
 
     model_cls, arch = model_config.registry.resolve_model_cls(

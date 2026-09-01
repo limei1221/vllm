@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import asyncio
-import importlib
-import inspect
 import multiprocessing
 import multiprocessing.forkserver as forkserver
 import os
@@ -29,28 +27,22 @@ from vllm.entrypoints.launcher import serve_http
 from vllm.entrypoints.openai.cli_args import make_arg_parser, validate_parsed_serve_args
 from vllm.entrypoints.openai.models.protocol import BaseModelPath
 from vllm.entrypoints.openai.models.serving import OpenAIServingModels
-from vllm.entrypoints.serve.elastic_ep.middleware import ScalingMiddleware
 from vllm.entrypoints.serve.exception_handling.register import init_exception_handler
-from vllm.entrypoints.serve.sagemaker.api_router import sagemaker_standards_bootstrap
 from vllm.entrypoints.serve.tokenize.serving import ServingTokenization
 from vllm.entrypoints.serve.utils.api_utils import (
     cli_env_setup,
     log_non_default_args,
     log_version_and_model,
-    process_lora_modules,
 )
 from vllm.entrypoints.serve.utils.request_logger import RequestLogger
 from vllm.entrypoints.serve.utils.server_utils import (
     get_uvicorn_log_config,
     lifespan,
-    log_response,
 )
 from vllm.logger import init_logger
-from vllm.reasoning import ReasoningParserManager
 from vllm.renderers.online_derenderer import OnlineDerenderer
 from vllm.renderers.online_renderer import OnlineRenderer
 from vllm.tasks import SupportedTask
-from vllm.tool_parsers import ToolParserManager
 from vllm.tracing import instrument
 from vllm.usage.usage_lib import UsageContext
 from vllm.utils.argparse_utils import FlexibleArgumentParser
@@ -64,41 +56,6 @@ prometheus_multiproc_dir: tempfile.TemporaryDirectory
 logger = init_logger("vllm.entrypoints.openai.api_server")
 
 _FALLBACK_SUPPORTED_TASKS: tuple[SupportedTask, ...] = ("generate",)
-
-
-def _attach_endpoint_plugins(
-    app: FastAPI, supported_tasks: tuple["SupportedTask", ...]
-) -> None:
-    """Phase A of endpoint plugin wiring: discover, gate and attach routes.
-
-    Attached last after all core routers. This is so endpoint plugin routes can
-    shadow core routes with the same path (see `EndpointPlugin.attach_router`
-    docstring). No-ops when no plugins are discovered/allowlisted.
-    """
-    from vllm.plugins import load_endpoint_plugins
-
-    endpoint_plugins = load_endpoint_plugins(supported_tasks)
-    for plugin in endpoint_plugins:
-        plugin.attach_router(app)
-    app.state.endpoint_plugins = endpoint_plugins
-
-
-async def _init_endpoint_plugins_state(
-    engine_client: EngineClient | None, state: State, args: Namespace
-) -> None:
-    """Phase B of endpoint plugin wiring: initialize per app plugin state.
-
-    `state.endpoint_plugins` is set by `_attach_endpoint_plugins` (Phase A)
-    in `build_app`. Some `init_app_state` callers (e.g. `run_batch.py`)
-    build their own bare `State` without going through `build_app`. As a result
-    `endpoint_plugins` may be absent and are treated that the same as "none attached".
-
-    `engine_client` is `None` for the CPU only render server which has no
-    engine (see `init_render_app_state`). Plugins must handle a `None`
-    `engine_client` themselves (see `EndpointPlugin.init_state`).
-    """
-    for plugin in getattr(state, "endpoint_plugins", []):
-        await plugin.init_state(engine_client, state, args)
 
 
 @asynccontextmanager
@@ -189,9 +146,7 @@ def build_app(
     if supported_tasks is None:
         supported_tasks = _FALLBACK_SUPPORTED_TASKS
 
-    app = FastAPI(
-        openapi_url=None, docs_url=None, redoc_url=None, lifespan=lifespan
-    )
+    app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None, lifespan=lifespan)
     app.state.args = args
 
     # Health and metrics (instrumentator)
@@ -295,20 +250,10 @@ async def init_app_state(
     state.args = args
     resolved_chat_template = load_chat_template(args.chat_template)
 
-    # Merge default_mm_loras into the static lora_modules
-    default_mm_loras = (
-        vllm_config.lora_config.default_mm_loras
-        if vllm_config.lora_config is not None
-        else {}
-    )
-    lora_modules = process_lora_modules(args.lora_modules, default_mm_loras)
-
     state.openai_serving_models = OpenAIServingModels(
         engine_client=engine_client,
         base_model_paths=base_model_paths,
-        lora_modules=lora_modules,
     )
-    await state.openai_serving_models.init_static_loras()
 
     state.online_renderer = OnlineRenderer(
         model_config=engine_client.model_config,
@@ -357,9 +302,6 @@ async def init_app_state(
         await init_generate_state(
             engine_client, state, args, request_logger, supported_tasks
         )
-
-
-    await _init_endpoint_plugins_state(engine_client, state, args)
 
     state.enable_server_load_tracking = args.enable_server_load_tracking
     state.server_load_metrics = 0
@@ -441,7 +383,6 @@ async def init_render_app_state(
         trust_request_chat_template=args.trust_request_chat_template,
     )
 
-
     state.vllm_config = vllm_config
     # Disable stats logging — there is no engine to poll.
     state.log_stats = False
@@ -452,7 +393,6 @@ async def init_render_app_state(
 
     # No `EngineClient` exists for the render server, so plugins get `None` and
     # must handle it themselves (see `EndpointPlugin.init_state`).
-    await _init_endpoint_plugins_state(None, state, args)
 
 
 def create_server_socket(
@@ -479,38 +419,12 @@ def create_server_unix_socket(path: str) -> socket.socket:
     return sock
 
 
-def validate_api_server_args(args):
-    valid_tool_parses = ToolParserManager.list_registered()
-    if args.enable_auto_tool_choice and args.tool_call_parser not in valid_tool_parses:
-        raise KeyError(
-            f"invalid tool call parser: {args.tool_call_parser} "
-            f"(chose from {{ {','.join(valid_tool_parses)} }})"
-        )
-
-    valid_reasoning_parsers = ReasoningParserManager.list_registered()
-    if (
-        reasoning_parser := args.structured_outputs_config.reasoning_parser
-    ) and reasoning_parser not in valid_reasoning_parsers:
-        raise KeyError(
-            f"invalid reasoning parser: {reasoning_parser} "
-            f"(chose from {{ {','.join(valid_reasoning_parsers)} }})"
-        )
-
-
 @instrument(span_name="API server setup")
 def setup_server(args, *, reuse_port: bool):
     """Validate API server args and create the server socket."""
 
     log_version_and_model(logger, VLLM_VERSION, args.model)
     log_non_default_args(args)
-
-    if args.tool_parser_plugin and len(args.tool_parser_plugin) > 3:
-        ToolParserManager.import_tool_parser(args.tool_parser_plugin)
-
-    if args.reasoning_parser_plugin and len(args.reasoning_parser_plugin) > 3:
-        ReasoningParserManager.import_reasoning_parser(args.reasoning_parser_plugin)
-
-    validate_api_server_args(args)
 
     # workaround to make sure that we bind the port before the engine is set up.
     # This avoids race conditions with ray.
@@ -648,12 +562,6 @@ async def run_server_worker(
     listen_address, sock, args, client_config=None, **uvicorn_kwargs
 ) -> None:
     """Run a single API server worker."""
-
-    if args.tool_parser_plugin and len(args.tool_parser_plugin) > 3:
-        ToolParserManager.import_tool_parser(args.tool_parser_plugin)
-
-    if args.reasoning_parser_plugin and len(args.reasoning_parser_plugin) > 3:
-        ReasoningParserManager.import_reasoning_parser(args.reasoning_parser_plugin)
 
     async with build_async_engine_client(
         args,

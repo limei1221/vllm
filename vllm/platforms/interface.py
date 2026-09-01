@@ -992,13 +992,6 @@ class Platform:
         raise NotImplementedError
 
     @classmethod
-    def get_punica_wrapper(cls) -> str:
-        """
-        Return the punica wrapper for current platform.
-        """
-        raise NotImplementedError
-
-    @classmethod
     def get_infinity_values(cls, dtype: torch.dtype) -> tuple[float, float]:
         """
         Return the platform specific values for (-inf, inf)

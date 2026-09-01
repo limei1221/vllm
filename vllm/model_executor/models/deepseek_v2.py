@@ -104,7 +104,6 @@ from .interfaces import (
     MixtureOfExperts,
     SupportsEagle,
     SupportsEagle3,
-    SupportsLoRA,
     SupportsPP,
 )
 from .utils import (
@@ -1795,7 +1794,6 @@ class DeepseekV2ForCausalLM(
     nn.Module,
     SupportsPP,
     DeepseekV2MixtureOfExperts,
-    SupportsLoRA,
     SupportsEagle,
     SupportsEagle3,
 ):

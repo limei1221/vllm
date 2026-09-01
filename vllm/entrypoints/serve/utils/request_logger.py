@@ -7,7 +7,6 @@ from collections.abc import Sequence
 import torch
 
 from vllm.logger import init_logger
-from vllm.lora.request import LoRARequest
 from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import BeamSearchParams, SamplingParams
 
@@ -39,7 +38,6 @@ class RequestLogger:
         prompt_token_ids: list[int] | None,
         prompt_embeds: torch.Tensor | None,
         params: SamplingParams | PoolingParams | BeamSearchParams | None,
-        lora_request: LoRARequest | None,
     ) -> None:
         if logger.isEnabledFor(logging.DEBUG):
             max_log_len = self.max_log_len
@@ -61,10 +59,9 @@ class RequestLogger:
             )
 
         logger.info(
-            "Received request %s: params: %s, lora_request: %s.",
+            "Received request %s: params: %s.",
             request_id,
             params,
-            lora_request,
         )
 
     def log_outputs(

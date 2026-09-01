@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 
-from vllm.multimodal.inputs import MultiModalFeatureSpec
 from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingParams
 from vllm.utils import length_from_prompt_token_ids_or_embeds
@@ -21,11 +20,9 @@ from vllm.v1.engine import (
     FinishReason,
 )
 from vllm.v1.metrics.stats import PrefillStats
-from vllm.v1.structured_output.request import StructuredOutputRequest
 from vllm.v1.utils import ConstantList
 
 if TYPE_CHECKING:
-    from vllm.lora.request import LoRARequest
     from vllm.v1.core.kv_cache_utils import BlockHash
 
 
@@ -37,7 +34,6 @@ class StreamingUpdate:
     with new input data.
     """
 
-    mm_features: list[MultiModalFeatureSpec] | None
     prompt_token_ids: list[int] | None
     max_tokens: int
     arrival_time: float
@@ -48,7 +44,6 @@ class StreamingUpdate:
         if not request.resumable:
             return None
         return cls(
-            mm_features=request.mm_features,
             prompt_token_ids=request.prompt_token_ids,
             max_tokens=request.max_tokens,
             arrival_time=request.arrival_time,
@@ -67,8 +62,6 @@ class Request:
         arrival_time: float | None = None,
         prompt_embeds: torch.Tensor | None = None,
         prompt_is_token_ids: list[bool] | None = None,
-        mm_features: list[MultiModalFeatureSpec] | None = None,
-        lora_request: "LoRARequest | None" = None,
         cache_salt: str | None = None,
         priority: int = 0,
         trace_headers: Mapping[str, str] | None = None,
@@ -84,15 +77,7 @@ class Request:
         self.priority = priority
         self.sampling_params = sampling_params
         self.pooling_params = pooling_params
-        self.lora_request = lora_request
-        self.structured_output_request = StructuredOutputRequest.from_sampling_params(
-            sampling_params
-        )
-        if self.structured_output_request is not None:
-            self.structured_output_request.reasoning_ended = reasoning_ended
-            self.structured_output_request.reasoning_parser_kwargs = (
-                reasoning_parser_kwargs
-            )
+        self.structured_output_request = None
         self.arrival_time = arrival_time if arrival_time is not None else time.time()
 
         self.status = RequestStatus.WAITING
@@ -111,9 +96,6 @@ class Request:
             # Generative models.
             assert sampling_params.max_tokens is not None
             self.max_tokens = sampling_params.max_tokens
-            if self.structured_output_request is not None:
-                self.status = RequestStatus.WAITING_FOR_STRUCTURED_OUTPUT_GRAMMAR
-
             if sampling_params.extra_args is not None:
                 self.kv_transfer_params = sampling_params.extra_args.get(
                     "kv_transfer_params"
@@ -174,9 +156,6 @@ class Request:
         self.num_computed_tokens = 0
         self.cache_salt: str | None = cache_salt
 
-        # Multi-modal related
-        self.mm_features = mm_features or []
-
         # Read-only views
         # Prevent directly appending to these lists since
         # they should also be updated simultaneously.
@@ -233,11 +212,9 @@ class Request:
             prompt_token_ids=request.prompt_token_ids,
             prompt_embeds=request.prompt_embeds,
             prompt_is_token_ids=request.prompt_is_token_ids,
-            mm_features=request.mm_features,
             sampling_params=request.sampling_params,
             pooling_params=request.pooling_params,
             arrival_time=request.arrival_time,
-            lora_request=request.lora_request,
             cache_salt=request.cache_salt,
             priority=request.priority,
             trace_headers=request.trace_headers,
@@ -269,7 +246,7 @@ class Request:
 
     @property
     def use_structured_output(self) -> bool:
-        return self.structured_output_request is not None
+        return False
 
     @property
     def num_tokens(self) -> int:
@@ -282,14 +259,6 @@ class Request:
     @property
     def num_output_tokens(self) -> int:
         return len(self._output_token_ids)
-
-    @property
-    def num_encoder_inputs(self) -> int:
-        return len(self.mm_features)
-
-    @property
-    def has_encoder_inputs(self) -> bool:
-        return self.num_encoder_inputs > 0
 
     def get_skip_reading_prefix_cache(self) -> bool:
         if (
@@ -309,10 +278,6 @@ class Request:
 
     def get_finished_reason(self) -> FinishReason | None:
         return RequestStatus.get_finished_reason(self.status)
-
-    def get_num_encoder_embeds(self, input_id: int) -> int:
-        assert input_id < len(self.mm_features)
-        return self.mm_features[input_id].mm_position.get_num_embeds()
 
     def record_event(
         self,

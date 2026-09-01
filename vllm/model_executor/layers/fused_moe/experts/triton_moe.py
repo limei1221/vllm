@@ -15,9 +15,6 @@ from vllm.model_executor.layers.fused_moe.config import (
     FusedMoEParallelConfig,
     FusedMoEQuantConfig,
 )
-from vllm.model_executor.layers.fused_moe.experts.lora_experts_mixin import (
-    LoRAExpertsMixin,
-)
 from vllm.model_executor.layers.fused_moe.fused_moe import (
     _prepare_expert_assignment,
     invoke_fused_moe_triton_kernel,
@@ -59,8 +56,12 @@ from vllm.triton_utils import tl
 from vllm.utils.multi_stream_utils import maybe_execute_in_parallel
 
 
-class TritonExperts(LoRAExpertsMixin, mk.FusedMoEExpertsModular):
+class TritonExperts(mk.FusedMoEExpertsModular):
     """Triton-based fused MoE expert implementation."""
+
+    # MoE LoRA is not part of this build; the fused paths below stay
+    # LoRA-shaped but never see a context.
+    _lora_context = None
 
     @staticmethod
     def is_supported_config(

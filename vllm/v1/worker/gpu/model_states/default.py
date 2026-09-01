@@ -53,7 +53,6 @@ class DefaultModelState(ModelState):
                 req_index,
                 self.model,
                 new_req_data.prefill_token_ids,
-                mm_features=new_req_data.mm_features,
             )
 
     def apply_staged_writes(self) -> None:
@@ -161,7 +160,6 @@ class DefaultModelState(ModelState):
         ):
             req_doc_ranges = compute_mm_prefix_ranges(
                 req_ids=input_batch.req_ids,
-                mm_features=self.encoder_cache.mm_features,
                 sliding_window=self.model_config.get_sliding_window(),
             )
         attn_metadata = build_attn_metadata(

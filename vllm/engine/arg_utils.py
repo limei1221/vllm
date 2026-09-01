@@ -27,7 +27,6 @@ from typing import (
 
 import huggingface_hub
 import regex as re
-import torch
 from pydantic import TypeAdapter, ValidationError
 from pydantic.fields import FieldInfo
 from typing_extensions import TypeIs
@@ -48,7 +47,6 @@ from vllm.config import (
     KVEventsConfig,
     KVTransferConfig,
     LoadConfig,
-    LoRAConfig,
     MambaConfig,
     ModelConfig,
     MultiModalConfig,
@@ -77,7 +75,6 @@ from vllm.config.cache import (
 from vllm.config.device import Device
 from vllm.config.kernel import IrOpPriorityConfig, LinearBackend, MoEBackend
 from vllm.config.load import SafetensorsLoadStrategy
-from vllm.config.lora import MaxLoRARanks
 from vllm.config.mamba import MambaBackendEnum, MambaSSUAlgorithm
 from vllm.config.model import (
     ConvertOption,
@@ -107,7 +104,6 @@ from vllm.config.utils import get_field
 from vllm.config.vllm import OptimizationLevel, PerformanceMode
 from vllm.logger import init_logger, suppress_logging
 from vllm.platforms import CpuArchEnum, current_platform
-from vllm.plugins import load_general_plugins
 from vllm.ray.lazy_utils import is_in_ray_actor, is_ray_initialized
 from vllm.transformers_utils.config import maybe_override_with_speculators
 from vllm.transformers_utils.repo_utils import get_model_path
@@ -602,19 +598,6 @@ class EngineArgs:
     mm_processor_device: MMProcessorDevice = "auto"
     mm_ipc_gpu_memory_gb: float = MultiModalConfig.mm_ipc_gpu_memory_gb
     mm_device_do_normalize: bool | None = MultiModalConfig.mm_device_do_normalize
-    # LoRA fields
-    enable_lora: bool = False
-    max_loras: int = LoRAConfig.max_loras
-    max_lora_rank: MaxLoRARanks = LoRAConfig.max_lora_rank
-    default_mm_loras: dict[str, str] | None = LoRAConfig.default_mm_loras
-    fully_sharded_loras: bool = LoRAConfig.fully_sharded_loras
-    max_cpu_loras: int | None = LoRAConfig.max_cpu_loras
-    lora_dtype: str | torch.dtype | None = LoRAConfig.lora_dtype
-    lora_target_modules: list[str] | None = LoRAConfig.target_modules
-    enable_tower_connector_lora: bool = LoRAConfig.enable_tower_connector_lora
-    specialize_active_lora: bool = LoRAConfig.specialize_active_lora
-    enable_mixed_moe_lora_format: bool = LoRAConfig.enable_mixed_moe_lora_format
-    enable_moe_shared_loras: bool = LoRAConfig.enable_moe_shared_loras
 
     ray_workers_use_nsight: bool = ParallelConfig.ray_workers_use_nsight
     num_gpu_blocks_override: int | None = CacheConfig.num_gpu_blocks_override
@@ -798,9 +781,7 @@ class EngineArgs:
         )
 
         # Setup plugins
-        from vllm.plugins import load_general_plugins
 
-        load_general_plugins()
         # when use hf offline,replace model and tokenizer id to local model path
         if huggingface_hub.constants.HF_HUB_OFFLINE:
             # Skip cloud storage URIs (s3://, gs://, az://) — they are not
@@ -1398,47 +1379,6 @@ class EngineArgs:
                 **multimodal_kwargs["mm_device_do_normalize"],
                 "default": None,
             },
-        )
-
-        # LoRA related configs
-        lora_kwargs = get_kwargs(LoRAConfig)
-        lora_group = parser.add_argument_group(
-            title="LoRAConfig",
-            description=LoRAConfig.__doc__,
-        )
-        lora_group.add_argument(
-            "--enable-lora",
-            action=argparse.BooleanOptionalAction,
-            help="If True, enable handling of LoRA adapters.",
-        )
-        lora_group.add_argument("--max-loras", **lora_kwargs["max_loras"])
-        lora_group.add_argument("--max-lora-rank", **lora_kwargs["max_lora_rank"])
-        lora_group.add_argument(
-            "--lora-dtype",
-            **lora_kwargs["lora_dtype"],
-        )
-        lora_group.add_argument(
-            "--enable-tower-connector-lora",
-            **lora_kwargs["enable_tower_connector_lora"],
-        )
-        lora_group.add_argument("--max-cpu-loras", **lora_kwargs["max_cpu_loras"])
-        lora_group.add_argument(
-            "--fully-sharded-loras", **lora_kwargs["fully_sharded_loras"]
-        )
-        lora_group.add_argument(
-            "--lora-target-modules", **lora_kwargs["target_modules"]
-        )
-        lora_group.add_argument("--default-mm-loras", **lora_kwargs["default_mm_loras"])
-        lora_group.add_argument(
-            "--specialize-active-lora", **lora_kwargs["specialize_active_lora"]
-        )
-        lora_group.add_argument(
-            "--enable-mixed-moe-lora-format",
-            **lora_kwargs["enable_mixed_moe_lora_format"],
-        )
-        lora_group.add_argument(
-            "--enable-moe-shared-loras",
-            **lora_kwargs["enable_moe_shared_loras"],
         )
 
         # Observability arguments
@@ -2268,7 +2208,6 @@ class EngineArgs:
             target_model_config=model_config,
             target_parallel_config=parallel_config,
         )
-        diffusion_config = self.create_diffusion_config()
 
         self._set_default_max_num_seqs_and_batched_tokens_args(
             usage_context,
@@ -2306,46 +2245,6 @@ class EngineArgs:
             async_scheduling=self.async_scheduling,
             stream_interval=self.stream_interval,
         )
-
-        if not model_config.is_multimodal_model and self.default_mm_loras:
-            raise ValueError(
-                "Default modality-specific LoRA(s) were provided for a "
-                "non multimodal model"
-            )
-
-        lora_config = (
-            LoRAConfig(
-                max_lora_rank=self.max_lora_rank,
-                max_loras=self.max_loras,
-                default_mm_loras=self.default_mm_loras,
-                fully_sharded_loras=self.fully_sharded_loras,
-                lora_dtype=self.lora_dtype,
-                target_modules=self.lora_target_modules,
-                enable_tower_connector_lora=self.enable_tower_connector_lora,
-                specialize_active_lora=self.specialize_active_lora,
-                enable_mixed_moe_lora_format=self.enable_mixed_moe_lora_format,
-                enable_moe_shared_loras=self.enable_moe_shared_loras,
-                max_cpu_loras=self.max_cpu_loras
-                if self.max_cpu_loras and self.max_cpu_loras > 0
-                else None,
-            )
-            if self.enable_lora
-            else None
-        )
-
-        if (
-            lora_config is not None
-            and speculative_config is not None
-            and scheduler_config.max_num_batched_tokens
-            < (
-                scheduler_config.max_num_seqs
-                * (speculative_config.num_speculative_tokens + 1)
-            )
-        ):
-            raise ValueError(
-                "Consider increasing max_num_batched_tokens or "
-                "decreasing num_speculative_tokens"
-            )
 
         # Attention config overrides
         attention_config = copy.deepcopy(self.attention_config)
@@ -2516,8 +2415,6 @@ class EngineArgs:
 
     def _check_feature_supported(self):
         """Raise an error if the feature is not supported."""
-        if self.enable_lora:
-            _raise_unsupported_error(feature_name="LoRA")
         if self.pipeline_parallel_size > 1:
             supports_pp = getattr(
                 self.distributed_executor_backend, "supports_pp", False
@@ -2706,39 +2603,6 @@ class EngineArgs:
             self.reasoning_config = ReasoningConfig()
         self.reasoning_config.reasoning_parser = self.reasoning_parser
 
-    @staticmethod
-    def _get_min_mm_batched_tokens(
-        model_config: ModelConfig,
-    ) -> tuple[int, str] | None:
-        """Get the minimum max_num_batched_tokens needed for a multimodal
-        prefix-LM model to process at least one item of any supported modality.
-
-        Returns (token_count, modality_name) for the most expensive modality,
-        or None if the value cannot be determined at this stage.
-        """
-        try:
-            from vllm.multimodal import MULTIMODAL_REGISTRY
-
-            # get_processing_info returns the model's multimodal processing
-            # metadata (supported modalities, token limits) without loading
-            # model weights or generating dummy data.
-            info = MULTIMODAL_REGISTRY.get_processing_info(model_config)
-            mm_counts = {modality: 1 for modality in info.supported_mm_limits}
-            # get_mm_max_tokens_per_item returns pre-computed per-item token
-            # ceilings for models that override it (e.g., Gemma4), or None
-            # for models that rely on dummy-input profiling. When None is
-            # returned we bail out — no dummy generation is triggered here.
-            max_tokens = info.get_mm_max_tokens_per_item(
-                seq_len=model_config.max_model_len,
-                mm_counts=mm_counts,
-            )
-            if max_tokens is not None:
-                modality = max(max_tokens, key=max_tokens.__getitem__)
-                return (max_tokens[modality], modality)
-        except Exception as e:
-            logger.warning("Failed to determine min multimodal batched tokens: %s", e)
-        return None
-
     def _set_default_max_num_seqs_and_batched_tokens_args(
         self,
         usage_context: UsageContext | None,
@@ -2789,23 +2653,6 @@ class EngineArgs:
                     self.max_num_batched_tokens,
                 )
 
-            # For multimodal prefix-LM models (e.g., Gemma 4) that disable
-            # chunked MM input, a single multimodal item must fit in one batch.
-            # Raise the floor to accommodate the largest per-item token count.
-            if model_config.is_multimodal_model and model_config.is_mm_prefix_lm:
-                result = self._get_min_mm_batched_tokens(model_config)
-                if result is not None and result[0] > self.max_num_batched_tokens:
-                    mm_min, modality = result
-                    logger.info(
-                        "Raising max_num_batched_tokens from %d to %d to "
-                        "accommodate '%s' input for prefix-LM model %s.",
-                        self.max_num_batched_tokens,
-                        mm_min,
-                        modality,
-                        model_config.model,
-                    )
-                    self.max_num_batched_tokens = mm_min
-
             # When using default settings,
             # Ensure max_num_batched_tokens does not exceed model limit.
             # Some models (e.g., Whisper) have embeddings tied to max length.
@@ -2844,7 +2691,6 @@ class AsyncEngineArgs(EngineArgs):
         # Initialize plugin to update the parser, for example, The plugin may
         # add a new kind of quantization method to --quantization argument or
         # a new device to --device argument.
-        load_general_plugins()
         if not async_args_only:
             parser = EngineArgs.add_cli_args(parser)
         parser.add_argument(
@@ -2852,7 +2698,7 @@ class AsyncEngineArgs(EngineArgs):
             action=argparse.BooleanOptionalAction,
             default=AsyncEngineArgs.enable_log_requests,
             help="Enable logging request information, dependent on log level:\n"
-            "- INFO: Request ID, parameters and LoRA request.\n"
+            "- INFO: Request ID and parameters.\n"
             "- DEBUG: Prompt inputs (e.g: text, token IDs).\n"
             "You can set the minimum log level via `VLLM_LOGGING_LEVEL`.",
         )

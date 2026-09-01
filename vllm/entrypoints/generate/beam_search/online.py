@@ -10,7 +10,6 @@ import numpy as np
 from vllm import CompletionOutput, RequestOutput
 from vllm.engine.protocol import EngineClient
 from vllm.inputs import EngineInput
-from vllm.lora.request import LoRARequest
 from vllm.renderers import BaseRenderer
 from vllm.sampling_params import BeamSearchParams, SamplingParams
 from vllm.utils import random_uuid
@@ -30,7 +29,6 @@ class BeamSearchOnlineMixin(ABC):
         prompt: EngineInput,
         request_id: str,
         params: BeamSearchParams,
-        lora_request: LoRARequest | None = None,
         trace_headers: Mapping[str, str] | None = None,
         session_id: str | None = None,
     ) -> AsyncGenerator[RequestOutput, None]:
@@ -70,7 +68,6 @@ class BeamSearchOnlineMixin(ABC):
                 tokens=prompt_token_ids,
                 cum_logprob=0,
                 logprobs=[],
-                lora_request=lora_request,
             )
         ]
         completed = []
@@ -81,7 +78,6 @@ class BeamSearchOnlineMixin(ABC):
 
             for i, beam in enumerate(all_beams):
                 prompt_item = beam.get_prompt()
-                lora_request_item = beam.lora_request
                 request_id_item = f"{request_id_batch}-beam-{i}"
                 task = asyncio.create_task(
                     collect_from_async_generator(
@@ -89,7 +85,6 @@ class BeamSearchOnlineMixin(ABC):
                             prompt_item,
                             sampling_params,
                             request_id_item,
-                            lora_request=lora_request_item,
                             trace_headers=trace_headers,
                             session_id=session_id,
                         )
@@ -178,7 +173,6 @@ class BeamSearchOnlineMixin(ABC):
                         orig_prompt=prompt,
                         tokens=current_beam.tokens + [token_id],
                         logprobs=current_beam.logprobs + [logprobs],
-                        lora_request=current_beam.lora_request,
                         cum_logprob=cum_logprob,
                     )
                 )

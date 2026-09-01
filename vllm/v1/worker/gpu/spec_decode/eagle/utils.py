@@ -5,7 +5,6 @@ import torch.nn as nn
 
 from vllm.config import VllmConfig, replace
 from vllm.distributed.parallel_state import get_pp_group
-from vllm.lora.layers.base import BaseLayerWithLoRA
 from vllm.model_executor.model_loader import get_model
 
 
@@ -70,8 +69,6 @@ def load_eagle_model(target_model: nn.Module, vllm_config: VllmConfig) -> nn.Mod
         # would make the draft run the LoRA embedding kernel with the target's
         # punica metadata (sized for the target's token count), causing an
         # out-of-bounds GPU access during multi-step draft decode.
-        if isinstance(target_embed, BaseLayerWithLoRA):
-            target_embed = target_embed.base_layer
         draft_embed = getattr(draft_inner, "embed_tokens", None)
         if target_embed is not None and _should_share(
             eagle_model, "has_own_embed_tokens", draft_embed, target_embed

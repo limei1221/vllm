@@ -15,6 +15,9 @@ logger = init_logger(__name__)
 # consistent behavior (similar to IS_AITER_FOUND in _aiter_ops.py).
 _ROCM_FLASH_ATTN_AVAILABLE = False
 
+# Re-exported for the FlashAttention backends. This build is CUDA-only; the
+# non-CUDA fallbacks exist so the names stay bound (and fail at call time
+# rather than import time) on machines without the compiled extension.
 if current_platform.is_cuda():
     from vllm._custom_ops import reshape_and_cache_flash
     from vllm.vllm_flash_attn import (  # type: ignore[attr-defined]
@@ -22,49 +25,15 @@ if current_platform.is_cuda():
         flash_attn_varlen_func,
         get_scheduler_metadata,
     )
+else:
 
-elif current_platform.is_xpu():
-    from vllm import _custom_ops as ops
-    from vllm._xpu_ops import xpu_ops
+    def _flash_attn_unavailable(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("FlashAttention is only available on CUDA in this build.")
 
-    reshape_and_cache_flash = ops.reshape_and_cache_flash
-    flash_attn_varlen_func = xpu_ops.flash_attn_varlen_func  # type: ignore[assignment]
-    compile_flash_attn_varlen_func_from_specs = None  # type: ignore[assignment]
-    get_scheduler_metadata = xpu_ops.get_scheduler_metadata  # type: ignore[assignment]
-elif current_platform.is_rocm():
-    # On ROCm we use AITER's Triton flash-attention; the upstream flash-attn
-    # package is not installed/available. (Same source as aiter_triton_mla.py.)
-    # The FA4 compile-from-specs API is CUDA-only, so it is unavailable on ROCm
-    # regardless of whether AITER is present.
-    from vllm.platforms.rocm import on_gfx1250
-
-    compile_flash_attn_varlen_func_from_specs = None  # type: ignore[assignment]
-    try:
-        if on_gfx1250():
-            from aiter.ops.triton.mha import (  # type: ignore[no-redef]
-                flash_attn_varlen_func,
-            )
-        else:
-            from flash_attn import flash_attn_varlen_func  # type: ignore[no-redef]
-
-        _ROCM_FLASH_ATTN_AVAILABLE = True
-    except ImportError:
-
-        def flash_attn_varlen_func(*args: Any, **kwargs: Any) -> Any:  # type: ignore[no-redef,misc]
-            package = "aiter" if on_gfx1250() else "flash-attn"
-            raise ImportError(
-                f"ROCm platform requires upstream {package} "
-                f"to be installed. Please install {package} first."
-            )
-
-    # ROCm doesn't use scheduler metadata (FA3 feature), provide stub
-    def get_scheduler_metadata(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
-        return None
-
-    # ROCm uses the C++ custom op for reshape_and_cache
-    from vllm import _custom_ops as ops
-
-    reshape_and_cache_flash = ops.reshape_and_cache_flash
+    reshape_and_cache_flash = _flash_attn_unavailable
+    compile_flash_attn_varlen_func_from_specs = _flash_attn_unavailable
+    flash_attn_varlen_func = _flash_attn_unavailable
+    get_scheduler_metadata = _flash_attn_unavailable
 
 
 def get_flash_attn_version(

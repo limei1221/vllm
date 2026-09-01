@@ -21,7 +21,6 @@ from vllm.entrypoints.chat_utils import (
 )
 from vllm.inputs import EngineInput
 from vllm.logger import init_logger
-from vllm.lora.request import LoRARequest
 from vllm.renderers import BaseRenderer, ChatParams, merge_kwargs
 from vllm.renderers.inputs.preprocess import (
     conversation_to_seq,
@@ -53,58 +52,6 @@ class OfflineInferenceMixin:
     renderer: BaseRenderer
     llm_engine: "LLMEngine"
     model_config: ModelConfig
-
-    def _resolve_mm_lora(
-        self,
-        prompt: EngineInput,
-        lora_request: LoRARequest | None,
-    ) -> LoRARequest | None:
-        if prompt["type"] != "multimodal":
-            return lora_request
-
-        lora_config = self.llm_engine.vllm_config.lora_config
-        default_mm_loras = None if lora_config is None else lora_config.default_mm_loras
-        if not default_mm_loras:
-            return lora_request
-
-        prompt_modalities = prompt["mm_placeholders"].keys()
-        intersection = set(prompt_modalities).intersection(default_mm_loras.keys())
-        if not intersection:
-            return lora_request
-
-        if len(intersection) > 1:
-            # TODO: Would be nice to be able to have multiple loras per prompt
-            logger.warning(
-                "Multiple modality specific loras were registered and would be "
-                "used by a single prompt consuming several modalities; "
-                "currently we only support one lora per request; as such, "
-                "lora(s) registered with modalities: %s will be skipped",
-                intersection,
-            )
-            return lora_request
-
-        # Build the LoRA request; the ID of the default mm lora is the
-        # index of the modality name sorted alphabetically + 1.
-        modality_name = intersection.pop()
-        modality_lora_path = default_mm_loras[modality_name]
-        modality_lora_id = sorted(default_mm_loras).index(modality_name) + 1
-
-        # If we have a collision, warn if there is a collision,
-        # but always send the explicitly provided request.
-        if lora_request:
-            if lora_request.lora_int_id != modality_lora_id:
-                logger.warning(
-                    "A modality with a registered lora and a lora_request "
-                    "with a different ID were provided; falling back to the "
-                    "lora_request as we only apply one LoRARequest per prompt"
-                )
-            return lora_request
-
-        return LoRARequest(
-            modality_name,
-            modality_lora_id,
-            modality_lora_path,
-        )
 
     def _preprocess_cmpl(
         self,
@@ -255,22 +202,6 @@ class OfflineInferenceMixin:
 
         return [params] * num_requests
 
-    def _lora_request_to_seq(
-        self,
-        lora_request: LoRARequest | None | Sequence[LoRARequest | None],
-        num_requests: int,
-    ) -> Sequence[LoRARequest | None]:
-        if isinstance(lora_request, Sequence):
-            if len(lora_request) != num_requests:
-                raise ValueError(
-                    f"The lengths of prompts ({num_requests}) "
-                    f"and lora_request ({len(lora_request)}) must be the same."
-                )
-
-            return lora_request
-
-        return [lora_request] * num_requests
-
     def _priority_to_seq(
         self,
         priority: list[int] | None,
@@ -295,14 +226,12 @@ class OfflineInferenceMixin:
         | Sequence[SamplingParams | PoolingParams],
         *,
         use_tqdm: bool | Callable[..., tqdm] = True,
-        lora_request: Sequence[LoRARequest] | LoRARequest | None = None,
         priority: list[int] | None = None,
         tokenization_kwargs: dict[str, Any] | None = None,
         mm_processor_kwargs: dict[str, Any] | None = None,
     ) -> list[str]:
         seq_prompts = prompt_to_seq(prompts)
         seq_params = self._params_to_seq(params, len(seq_prompts))
-        seq_lora_requests = self._lora_request_to_seq(lora_request, len(seq_prompts))
         seq_priority = self._priority_to_seq(priority, len(seq_prompts))
 
         return self._render_and_add_requests(
@@ -319,7 +248,6 @@ class OfflineInferenceMixin:
                 )
             ),
             params=seq_params,
-            lora_requests=seq_lora_requests,
             priorities=seq_priority,
         )
 
@@ -332,7 +260,6 @@ class OfflineInferenceMixin:
         output_type: type[_O],
         *,
         use_tqdm: bool | Callable[..., tqdm] = True,
-        lora_request: Sequence[LoRARequest] | LoRARequest | None = None,
         priority: list[int] | None = None,
         tokenization_kwargs: dict[str, Any] | None = None,
         mm_processor_kwargs: dict[str, Any] | None = None,
@@ -341,7 +268,6 @@ class OfflineInferenceMixin:
             prompts=prompts,
             params=params,
             use_tqdm=use_tqdm,
-            lora_request=lora_request,
             priority=priority,
             tokenization_kwargs=tokenization_kwargs,
             mm_processor_kwargs=mm_processor_kwargs,
@@ -358,7 +284,6 @@ class OfflineInferenceMixin:
         output_type: type[_O],
         *,
         use_tqdm: bool | Callable[..., tqdm] = True,
-        lora_request: Sequence[LoRARequest] | LoRARequest | None = None,
         chat_template: str | None = None,
         chat_template_content_format: ChatTemplateContentFormatOption = "auto",
         add_generation_prompt: bool = True,
@@ -372,7 +297,6 @@ class OfflineInferenceMixin:
             messages=messages,
             params=params,
             use_tqdm=use_tqdm,
-            lora_request=lora_request,
             chat_template=chat_template,
             chat_template_content_format=chat_template_content_format,
             chat_template_kwargs=chat_template_kwargs,
@@ -393,7 +317,6 @@ class OfflineInferenceMixin:
         | Sequence[SamplingParams | PoolingParams],
         *,
         use_tqdm: bool | Callable[..., tqdm] = True,
-        lora_request: Sequence[LoRARequest] | LoRARequest | None = None,
         priority: list[int] | None = None,
         chat_template: str | None = None,
         chat_template_content_format: ChatTemplateContentFormatOption = "auto",
@@ -406,7 +329,6 @@ class OfflineInferenceMixin:
     ) -> list[str]:
         seq_convs = conversation_to_seq(messages)
         seq_params = self._params_to_seq(params, len(seq_convs))
-        seq_lora_requests = self._lora_request_to_seq(lora_request, len(seq_convs))
         seq_priority = self._priority_to_seq(priority, len(seq_convs))
 
         # When thinking is enabled or tools are provided, and the model
@@ -440,7 +362,6 @@ class OfflineInferenceMixin:
                 )
             ),
             params=seq_params,
-            lora_requests=seq_lora_requests,
             priorities=seq_priority,
         )
 
@@ -497,7 +418,6 @@ class OfflineInferenceMixin:
         params: Sequence[SamplingParams | PoolingParams],
         output_type: type[_O],
         *,
-        lora_requests: Sequence[LoRARequest | None] | None = None,
         priorities: Sequence[int] | None = None,
         use_tqdm: bool | Callable[..., tqdm] = True,
     ):
@@ -514,7 +434,6 @@ class OfflineInferenceMixin:
         self._render_and_add_requests(
             prompts=prompts,
             params=params,
-            lora_requests=lora_requests,
             priorities=priorities,
         )
 
@@ -525,7 +444,6 @@ class OfflineInferenceMixin:
         prompts: Iterable[EngineInput],
         params: Sequence[SamplingParams | PoolingParams],
         *,
-        lora_requests: Sequence[LoRARequest | None] | None = None,
         priorities: Sequence[int] | None = None,
     ) -> list[str]:
         added_request_ids: list[str] = []
@@ -535,10 +453,6 @@ class OfflineInferenceMixin:
                 request_id = self._add_request(
                     prompt,
                     params[i],
-                    lora_request=self._resolve_mm_lora(
-                        prompt,
-                        None if lora_requests is None else lora_requests[i],
-                    ),
                     priority=0 if priorities is None else priorities[i],
                 )
                 added_request_ids.append(request_id)
@@ -553,7 +467,6 @@ class OfflineInferenceMixin:
         self,
         prompt: EngineInput,
         params: SamplingParams | PoolingParams,
-        lora_request: LoRARequest | None = None,
         priority: int = 0,
     ) -> str:
         if isinstance(params, SamplingParams):
@@ -566,7 +479,6 @@ class OfflineInferenceMixin:
             request_id,
             prompt,
             params,
-            lora_request=lora_request,
             priority=priority,
         )
 

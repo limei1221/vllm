@@ -17,8 +17,6 @@ from vllm.distributed.parallel_state import get_dp_group
 from vllm.engine.arg_utils import EngineArgs
 from vllm.inputs import EngineInput, PromptType
 from vllm.logger import init_logger
-from vllm.lora.request import LoRARequest
-from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from vllm.outputs import PoolingRequestOutput, RequestOutput
 from vllm.pooling_params import PoolingParams
 from vllm.renderers import renderer_from_config
@@ -56,7 +54,6 @@ class LLMEngine:
         aggregate_engine_logging: bool = False,
         usage_context: UsageContext = UsageContext.ENGINE_CONTEXT,
         stat_loggers: list[StatLoggerFactory] | None = None,
-        mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
         multiprocess_mode: bool = False,
     ) -> None:
         self.vllm_config = vllm_config
@@ -221,7 +218,6 @@ class LLMEngine:
         prompt: EngineCoreRequest | PromptType | EngineInput,
         params: SamplingParams | PoolingParams,
         arrival_time: float | None = None,
-        lora_request: LoRARequest | None = None,
         tokenization_kwargs: dict[str, Any] | None = None,
         trace_headers: Mapping[str, str] | None = None,
         priority: int = 0,
@@ -254,7 +250,6 @@ class LLMEngine:
                 params,
                 supported_tasks=self.get_supported_tasks(),
                 arrival_time=arrival_time,
-                lora_request=lora_request,
                 tokenization_kwargs=tokenization_kwargs,
                 trace_headers=trace_headers,
                 priority=priority,
@@ -401,22 +396,6 @@ class LLMEngine:
         if now - self._last_log_time >= envs.VLLM_LOG_STATS_INTERVAL:
             self.do_log_stats()
             self._last_log_time = now
-
-    def add_lora(self, lora_request: LoRARequest) -> bool:
-        """Load a new LoRA adapter into the engine for future requests."""
-        return self.engine_core.add_lora(lora_request)
-
-    def remove_lora(self, lora_id: int) -> bool:
-        """Remove an already loaded LoRA adapter."""
-        return self.engine_core.remove_lora(lora_id)
-
-    def list_loras(self) -> set[int]:
-        """List all registered adapters."""
-        return self.engine_core.list_loras()
-
-    def pin_lora(self, lora_id: int) -> bool:
-        """Prevent an adapter from being evicted."""
-        return self.engine_core.pin_lora(lora_id)
 
     def collective_rpc(
         self,

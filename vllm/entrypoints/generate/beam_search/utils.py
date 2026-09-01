@@ -12,7 +12,6 @@ from vllm.inputs import (
     tokens_input,
 )
 from vllm.logprobs import Logprob
-from vllm.lora.request import LoRARequest
 
 
 @dataclass
@@ -28,7 +27,6 @@ class BeamSearchSequence:
     # NOTE: Tokens represents decoder tokens in the encoder / decoder case
     tokens: list[int]
     logprobs: list[dict[int, Logprob]]
-    lora_request: LoRARequest | None = None
     cum_logprob: float = 0.0
     text: str | None = None
     finish_reason: str | None = None
@@ -113,7 +111,6 @@ class BeamSearchInstance:
     def __init__(
         self,
         prompt: TokensInput | MultiModalInput | EncoderDecoderInput,
-        lora_request: LoRARequest | None = None,
         logprobs: list[dict[int, Logprob]] | None = None,
         **kwargs,
     ):
@@ -127,7 +124,6 @@ class BeamSearchInstance:
                 orig_prompt=prompt,
                 tokens=initial_tokens,
                 logprobs=[] if logprobs is None else list(logprobs),
-                lora_request=lora_request,
                 **kwargs,
             )
         ]

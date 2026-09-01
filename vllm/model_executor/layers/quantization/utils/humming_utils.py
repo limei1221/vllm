@@ -18,11 +18,6 @@ from vllm.model_executor.layers.fused_moe.config import (
     FusedMoEQuantConfig,
     FusedMoEQuantDesc,
 )
-from vllm.model_executor.layers.fused_moe.experts.fused_humming_moe import (
-    BatchedHummingGroupedExperts,
-    HummingGroupedExperts,
-    HummingIndexedExperts,
-)
 from vllm.model_executor.layers.linear import LinearBase
 from vllm.model_executor.layers.quantization.utils.quant_utils import (
     FP4_DTYPE,
@@ -655,61 +650,11 @@ def select_humming_moe_experts(
     weight_key: QuantKey | None,
     activation_key: QuantKey | None,
 ) -> type[mk.FusedMoEExperts] | None:
+    """Select the primary Humming MoE experts class.
+
+    Humming MoE experts are not part of this build, so none is available.
     """
-    Select the primary Humming MoE Experts class
-    Note: Shape-specific fallbacks may still occur at runtime.
-    """
-
-    if not has_humming():
-        return None
-
-    # NOTE: the kernels are selected in the following order.
-    AVAILABLE_EXPERTS: list[type[mk.FusedMoEExperts]] = [
-        BatchedHummingGroupedExperts,
-        HummingGroupedExperts,
-        HummingIndexedExperts,
-    ]
-
-    # NOTE(rob): We need to peak into the P/F selection to determine
-    # if we are using the batched or standard expert format, which
-    # if not ideal. Once we unify TP + DP/EP, we can select P/F first.
-    activation_format = (
-        mk.FusedMoEActivationFormat.BatchedExperts
-        if config.moe_parallel_config.use_batched_activation_format
-        else mk.FusedMoEActivationFormat.Standard
-    )
-
-    def _make_log_backend(experts_cls: type[mk.FusedMoEExperts]):
-        return f"Using {experts_cls.__name__} Humming MoE backend."
-
-    def _make_log_unsupported(
-        experts_cls: type[mk.FusedMoEExperts], reason: str | None
-    ) -> str:
-        if reason:
-            return (
-                f"Humming MoE experts {experts_cls.__name__} does not support the "
-                f"deployment configuration since {reason}."
-            )
-        else:
-            return (
-                f"Humming MoE experts '{experts_cls.__name__}' does not support the "
-                "deployment configuration."
-            )
-
-    for k_cls in AVAILABLE_EXPERTS:
-        supported, reason = k_cls.is_supported_config(
-            k_cls,
-            config,
-            weight_key,
-            activation_key,
-            activation_format,
-        )
-        if supported:
-            logger.info_once(_make_log_backend(k_cls))
-            return k_cls
-        else:
-            logger.debug_once(_make_log_unsupported(k_cls, reason))
-
+    del config, weight_key, activation_key
     return None
 
 

@@ -10,7 +10,6 @@ from typing import Any, cast
 import numpy as np
 import torch
 
-from vllm.lora.request import LoRARequest
 from vllm.outputs import (
     STREAM_FINISHED,
     CompletionOutput,
@@ -34,7 +33,6 @@ from vllm.v1.engine.logprobs import LogprobsProcessor
 from vllm.v1.engine.parallel_sampling import ParentRequest
 from vllm.v1.metrics.stats import (
     IterationStats,
-    LoRARequestStates,
     RequestStateStats,
     SchedulerStats,
 )
@@ -135,7 +133,6 @@ class RequestState:
         external_req_id: str,
         parent_req: ParentRequest | None,
         request_index: int,
-        lora_request: LoRARequest | None,
         output_kind: RequestOutputKind,
         prompt: str | None,
         prompt_token_ids: list[int] | None,
@@ -156,8 +153,6 @@ class RequestState:
         self.external_req_id = external_req_id
         self.parent_req = parent_req
         self.request_index = request_index
-        self.lora_request = lora_request
-        self.lora_name = lora_request.lora_name if lora_request is not None else None
         self.output_kind = output_kind
         self.prompt = prompt
         self.prompt_token_ids = prompt_token_ids
@@ -258,7 +253,6 @@ class RequestState:
             external_req_id=request.external_req_id,
             parent_req=parent_req,
             request_index=request_index,
-            lora_request=request.lora_request,
             output_kind=output_kind,
             prompt=prompt,
             prompt_token_ids=request.prompt_token_ids,
@@ -375,7 +369,6 @@ class RequestState:
 
         return RequestOutput(
             request_id=external_req_id,  # request_id is what was provided externally
-            lora_request=self.lora_request,
             prompt=self.prompt,
             prompt_token_ids=prompt_token_ids,
             prompt_logprobs=prompt_logprobs,
@@ -452,7 +445,6 @@ class OutputProcessor:
         self.request_states: dict[str, RequestState] = {}
         self.parent_requests: dict[str, ParentRequest] = {}
         self.external_req_ids: defaultdict[str, list[str]] = defaultdict(list)
-        self.lora_states = LoRARequestStates(log_stats)
         self.tracing_enabled = tracing_enabled
 
     def get_num_unfinished_requests(self):
@@ -504,7 +496,6 @@ class OutputProcessor:
         for request_id in internal_req_ids:
             req_state = self.request_states.pop(request_id, None)
             if req_state is not None:
-                self.lora_states.request_finished(request_id, req_state.lora_name)
                 request_ids_to_abort.append(request_id)
                 # Produce final abort output.
                 if req_state.queue is not None and (
@@ -738,7 +729,7 @@ class OutputProcessor:
             self.parent_requests.pop(parent_req.request_id, None)
 
     def update_scheduler_stats(self, scheduler_stats: SchedulerStats | None):
-        self.lora_states.update_scheduler_stats(scheduler_stats)
+        pass
 
     def do_tracing(
         self,
@@ -819,8 +810,6 @@ class OutputProcessor:
             engine_core_timestamp,
             req_state.is_prefilling,
             req_state.stats,
-            self.lora_states,
-            req_state.lora_name,
         )
 
     def _update_stats_from_finished(
@@ -842,8 +831,6 @@ class OutputProcessor:
             req_stats=req_state.stats,
             num_cached_tokens=req_state.num_cached_tokens,
         )
-        self.lora_states.request_finished(req_state.request_id, req_state.lora_name)
-
         ParentRequest.observe_finished_request(
             req_state.parent_req, iteration_stats, req_state.stats.num_generation_tokens
         )

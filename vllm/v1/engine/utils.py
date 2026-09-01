@@ -31,13 +31,21 @@ from vllm.utils.network_utils import (
 from vllm.utils.system_utils import get_mp_context
 from vllm.v1.engine.coordinator import DPCoordinator
 from vllm.v1.executor import Executor
-from vllm.v1.executor.ray_utils import WORKER_SPECIFIC_ENV_VARS
 from vllm.v1.utils import _SubprocessWrapper, get_engine_client_zmq_addr, shutdown
 
 if TYPE_CHECKING:
     from ray.util.placement_group import PlacementGroup
 
 logger = init_logger(__name__)
+
+# Environment variables that must not be inherited by worker processes.
+WORKER_SPECIFIC_ENV_VARS: set[str] = {
+    "VLLM_HOST_IP",
+    "VLLM_HOST_PORT",
+    "LOCAL_RANK",
+    "CUDA_VISIBLE_DEVICES",
+}
+
 
 STARTUP_POLL_PERIOD_MS = 10000
 

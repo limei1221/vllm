@@ -10,8 +10,6 @@ import torch.nn as nn
 import vllm.ir
 from vllm.config import VllmConfig, set_current_vllm_config
 from vllm.logger import init_logger
-from vllm.lora.request import LoRARequest
-from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.tracing import instrument
 from vllm.utils.import_utils import resolve_obj_by_qualname
 from vllm.utils.system_utils import update_environment_variables
@@ -64,7 +62,6 @@ class WorkerBase:
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         self.cache_config = vllm_config.cache_config
-        self.lora_config = vllm_config.lora_config
         self.load_config = vllm_config.load_config
         self.parallel_config = vllm_config.parallel_config
         self.scheduler_config = vllm_config.scheduler_config
@@ -166,18 +163,6 @@ class WorkerBase:
         """
         raise NotImplementedError
 
-    def add_lora(self, lora_request: LoRARequest) -> bool:
-        raise NotImplementedError
-
-    def remove_lora(self, lora_id: int) -> bool:
-        raise NotImplementedError
-
-    def pin_lora(self, lora_id: int) -> bool:
-        raise NotImplementedError
-
-    def list_loras(self) -> set[int]:
-        raise NotImplementedError
-
     @property
     def vocab_size(self) -> int:
         """Get vocabulary size from model configuration."""
@@ -246,10 +231,6 @@ class WorkerWrapperBase:
 
         vllm_config.enable_trace_function_call_for_thread()
 
-        from vllm.plugins import load_general_plugins
-
-        load_general_plugins()
-
         parallel_config = vllm_config.parallel_config
         if isinstance(parallel_config.worker_cls, str):
             worker_class: type[WorkerBase] = resolve_obj_by_qualname(
@@ -311,12 +292,7 @@ class WorkerWrapperBase:
 
             self.mm_receiver_cache = None
         else:
-            self.mm_receiver_cache = (
-                MULTIMODAL_REGISTRY.worker_receiver_cache_from_config(
-                    vllm_config,
-                    shared_worker_lock,
-                )
-            )
+            self.mm_receiver_cache = None
 
         with set_current_vllm_config(self.vllm_config):
             # To make vLLM config available during worker initialization
@@ -337,21 +313,9 @@ class WorkerWrapperBase:
     def __getattr__(self, attr: str):
         return getattr(self.worker, attr)
 
-    def _apply_mm_cache(self, scheduler_output: SchedulerOutput) -> None:
-        mm_cache = self.mm_receiver_cache
-        if mm_cache is None:
-            return
-
-        for req_data in scheduler_output.scheduled_new_reqs:
-            req_data.mm_features = mm_cache.get_and_update_features(
-                req_data.mm_features
-            )
-
     def execute_model(
         self, scheduler_output: SchedulerOutput
     ) -> ModelRunnerOutput | AsyncModelRunnerOutput | None:
-        self._apply_mm_cache(scheduler_output)
-
         return self.worker.execute_model(scheduler_output)
 
     def reset_mm_cache(self) -> None:

@@ -94,19 +94,8 @@ if HAS_TRITON:
     from vllm.model_executor.layers.fused_moe.experts.batched_deep_gemm_moe import (
         BatchedDeepGemmExperts,
     )
-    from vllm.model_executor.layers.fused_moe.experts.cutlass_moe import (
-        CutlassBatchedExpertsFp8,
-        CutlassExpertsFp8,
-        CutlassExpertsW4A8Fp8,
-    )
     from vllm.model_executor.layers.fused_moe.experts.deep_gemm_moe import (
         DeepGemmExperts,
-    )
-    from vllm.model_executor.layers.fused_moe.experts.fused_batched_moe import (
-        BatchedTritonExperts,
-    )
-    from vllm.model_executor.layers.fused_moe.experts.rocm_aiter_moe import (
-        AiterExperts,
     )
     from vllm.model_executor.layers.fused_moe.experts.triton_deep_gemm_moe import (
         TritonOrDeepGemmExperts,
@@ -114,11 +103,6 @@ if HAS_TRITON:
     from vllm.model_executor.layers.fused_moe.experts.triton_moe import (
         TritonExperts,
         TritonWNA16Experts,
-    )
-    from vllm.model_executor.layers.fused_moe.experts.xpu_moe import (
-        XPUExperts,
-        XPUExpertsFp8,
-        XPUExpertsMxFp4,
     )
     from vllm.model_executor.layers.fused_moe.fused_moe import (
         fused_experts,
@@ -132,25 +116,15 @@ if HAS_TRITON:
     )
 
     __all__ += [
-        "AiterExperts",
         "fused_topk",
         "fused_experts",
         "get_config_file_name",
         "GroupedTopk",
-        "CutlassExpertsFp8",
-        "CutlassBatchedExpertsFp8",
-        "CutlassExpertsW4A8Fp8",
         "TritonExperts",
         "TritonWNA16Experts",
-        "BatchedTritonExperts",
         "DeepGemmExperts",
         "BatchedDeepGemmExperts",
         "TritonOrDeepGemmExperts",
-        "XPUExperts",
-        "XPUExpertsFp8",
-        "XPUExpertsBlockFp8",
-        "XPUExpertsMxFp8",
-        "XPUExpertsMxFp4",
     ]
 else:
     # Some model classes directly use the custom ops. Add placeholders

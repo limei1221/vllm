@@ -9,7 +9,9 @@ from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar, overload
 if TYPE_CHECKING:
     import torch
 
-    from vllm.multimodal.inputs import BatchedTensorInputs
+    # Multi-modal inputs are not part of this build; keep the alias for
+    # annotations that still mention batched tensor inputs.
+    BatchedTensorInputs: TypeAlias = Any
 
 _T = TypeVar("_T")
 _U = TypeVar("_U")

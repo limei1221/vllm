@@ -9,8 +9,6 @@ import numpy as np
 import torch
 
 from vllm.config.reasoning import ReasoningConfig
-from vllm.lora.request import LoRARequest
-from vllm.multimodal.inputs import MultiModalFeatureSpec
 from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.utils import length_from_prompt_token_ids_or_embeds
@@ -34,7 +32,6 @@ from vllm.v1.worker.block_table import MultiGroupBlockTable, SlotMappingMode
 class CachedRequestState:
     req_id: str
     prompt_token_ids: list[int] | None
-    mm_features: list[MultiModalFeatureSpec]
     sampling_params: SamplingParams | None
     generator: torch.Generator | None
 
@@ -47,7 +44,6 @@ class CachedRequestState:
 
     xdrope_positions: torch.Tensor | None = None
 
-    lora_request: LoRARequest | None = None
     prompt_embeds: torch.Tensor | None = None
     # To accumulate prompt logprobs tensor chunks across prefill steps.
     in_progress_prompt_logprobs_cpu: LogprobsTensors | None = None
@@ -250,11 +246,6 @@ class InputBatch:
             (max_num_reqs,), dtype=torch.int32, device="cpu", pin_memory=PIN_MEMORY
         )
         self.num_accepted_tokens_cpu = self.num_accepted_tokens_cpu_tensor.numpy()
-
-        # lora related
-        self.request_lora_mapping = np.zeros((self.max_num_reqs,), dtype=np.int64)
-        self.lora_id_to_request_ids: dict[int, set[str]] = {}
-        self.lora_id_to_lora_request: dict[int, LoRARequest] = {}
 
         # req_index -> generator
         # NOTE(woosuk): The indices of the requests that do not have their own
@@ -475,19 +466,6 @@ class InputBatch:
         # Speculative decoding: by default 1 token is generated.
         self.num_accepted_tokens_cpu[req_index] = 1
 
-        # Add request lora ID
-        if request.lora_request:
-            lora_id = request.lora_request.lora_int_id
-            if lora_id not in self.lora_id_to_request_ids:
-                self.lora_id_to_request_ids[lora_id] = set()
-
-            self.request_lora_mapping[req_index] = lora_id
-            self.lora_id_to_request_ids[lora_id].add(request.req_id)
-            self.lora_id_to_lora_request[lora_id] = request.lora_request
-        else:
-            # No LoRA
-            self.request_lora_mapping[req_index] = 0
-
         return req_index
 
     def update_req_spec_token_ids(
@@ -536,16 +514,6 @@ class InputBatch:
         self.req_output_token_ids[req_index] = None
         self.spec_token_ids[req_index].clear()
         self.block_table.clear_row(req_index)
-
-        # LoRA
-        lora_id = self.request_lora_mapping[req_index]
-        if lora_id != 0:
-            lora_req_ids = self.lora_id_to_request_ids[lora_id]
-            lora_req_ids.discard(req_id)
-            if not lora_req_ids:
-                del self.lora_id_to_request_ids[lora_id]
-                del self.lora_id_to_lora_request[lora_id]
-            self.request_lora_mapping[req_index] = 0
 
         if self.is_pooling_model:
             self.pooling_params.pop(req_id, None)
@@ -640,11 +608,6 @@ class InputBatch:
             self.req_prompt_embeds.pop(i1, None)
 
         self.block_table.swap_row(i1, i2)
-
-        self.request_lora_mapping[i1], self.request_lora_mapping[i2] = (
-            self.request_lora_mapping[i2],
-            self.request_lora_mapping[i1],
-        )
 
         if self.is_pooling_model:
             # Sampling and logits parameters don't apply to pooling models.
@@ -773,10 +736,6 @@ class InputBatch:
                 last_req_index
             ]
             self.block_table.move_row(last_req_index, empty_index)
-
-            self.request_lora_mapping[empty_index] = self.request_lora_mapping[
-                last_req_index
-            ]
 
             if self.is_pooling_model:
                 last_req_index -= 1
@@ -955,8 +914,6 @@ class InputBatch:
         assert len(self.req_ids) == len(self.pooling_params)
         return [self.pooling_params[req_id] for req_id in self.req_ids]
 
-
-
     def _make_prompt_token_ids_cpu_tensor(self) -> torch.Tensor:
         num_reqs = self.num_reqs
         max_prompt_len = self.num_prompt_tokens[:num_reqs].max()
@@ -973,31 +930,6 @@ class InputBatch:
         for i in range(num_reqs):
             prompt_token_ids[i, self.num_prompt_tokens[i] :] = self.vocab_size
         return prompt_token_ids_cpu_tensor
-
-    def make_lora_inputs(
-        self, num_scheduled_tokens: np.ndarray, num_sampled_tokens: np.ndarray
-    ) -> tuple[tuple[int, ...], tuple[int, ...], set[LoRARequest]]:
-        """
-        Given the num_scheduled_tokens for each request in the batch, return
-        datastructures used to activate the current LoRAs.
-        Returns:
-            1. prompt_lora_mapping: A tuple of size np.sum(num_sampled_tokens)
-               where, prompt_lora_mapping[i] is the LoRA id to use for the ith
-               sampled token.
-            2. token_lora_mapping: A tuple of size np.sum(num_scheduled_tokens)
-               where, token_lora_mapping[i] is the LoRA id to use for ith token.
-            3. lora_requests: Set of relevant LoRA requests.
-        """
-
-        req_lora_mapping = self.request_lora_mapping[: self.num_reqs]
-        prompt_lora_mapping = tuple(req_lora_mapping.repeat(num_sampled_tokens))
-        token_lora_mapping = tuple(req_lora_mapping.repeat(num_scheduled_tokens))
-
-        active_lora_requests: set[LoRARequest] = set(
-            self.lora_id_to_lora_request.values()
-        )
-
-        return prompt_lora_mapping, token_lora_mapping, active_lora_requests
 
     def set_async_sampled_token_ids(
         self,

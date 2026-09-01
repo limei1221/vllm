@@ -43,13 +43,14 @@ if TYPE_CHECKING:
     )
     from vllm.config.multimodal import VideoPruningMethod
     from vllm.inputs import PromptType, TokensPrompt
-    from vllm.lora.model_manager import LoRAModelManager
     from vllm.model_executor.layers.fused_moe import MoERunner
     from vllm.model_executor.layers.mamba.mamba_utils import MambaStateCopyFunc
     from vllm.model_executor.models.interfaces_base import VllmModel
     from vllm.model_executor.models.utils import WeightsMapper
-    from vllm.multimodal.inputs import MultiModalFeatureSpec, MultiModalKwargsItem
-    from vllm.multimodal.registry import _ProcessorFactories
+
+    MultiModalFeatureSpec: TypeAlias = Any
+    MultiModalKwargsItem: TypeAlias = Any
+    _ProcessorFactories: TypeAlias = Any
     from vllm.sequence import IntermediateTensors
     from vllm.tasks import ScoreType
     from vllm.v1.worker.encoder_cudagraph_defs import (
@@ -627,85 +628,8 @@ def supports_score_template(
     return getattr(model, "supports_score_template", False)
 
 
-@runtime_checkable
-class SupportsLoRA(Protocol):
-    """The interface required for all models that support LoRA."""
-
-    supports_lora: ClassVar[Literal[True]] = True
-    """
-    A flag that indicates this model supports LoRA.
-
-    Note:
-        There is no need to redefine this flag if this class is in the
-        MRO of your model class.
-    """
-    is_3d_moe_weight: ClassVar[bool] = False
-    is_non_gated_moe: ClassVar[bool] = False
-    # The `embedding_module` and `embedding_padding_modules`
-    # are empty by default.
-    embedding_modules: ClassVar[dict[str, str]] = {}
-    packed_modules_mapping: ClassVar[dict[str, list[str]]] = {}
-    # Module prefixes to skip during LoRA loading (e.g., ["mtp."] for MTP layers)
-    lora_skip_prefixes: ClassVar[list[str]] = []
-    lora_manager: "LoRAModelManager | None"
-
-
 # We can't use runtime_checkable with ClassVar for issubclass checks
 # so we need to treat the class as an instance and use isinstance instead
-@runtime_checkable
-class _SupportsLoRAType(Protocol):
-    supports_lora: Literal[True]
-
-    packed_modules_mapping: dict[str, list[str]]
-    embedding_modules: dict[str, str]
-
-
-@overload
-def supports_lora(model: type[object]) -> TypeIs[type[SupportsLoRA]]: ...
-
-
-@overload
-def supports_lora(model: object) -> TypeIs[SupportsLoRA]: ...
-
-
-def supports_lora(
-    model: type[object] | object,
-) -> TypeIs[type[SupportsLoRA]] | TypeIs[SupportsLoRA]:
-    result = _supports_lora(model)
-
-    if not result:
-        lora_attrs = (
-            "packed_modules_mapping",
-            "embedding_modules",
-        )
-        missing_attrs = tuple(attr for attr in lora_attrs if not hasattr(model, attr))
-
-        if getattr(model, "supports_lora", False):
-            if missing_attrs:
-                logger.warning(
-                    "The model (%s) sets `supports_lora=True`, "
-                    "but is missing LoRA-specific attributes: %s",
-                    model,
-                    missing_attrs,
-                )
-        else:
-            if not missing_attrs:
-                logger.warning(
-                    "The model (%s) contains all LoRA-specific attributes, "
-                    "but does not set `supports_lora=True`.",
-                    model,
-                )
-
-    return result
-
-
-def _supports_lora(model: type[object] | object) -> bool:
-    if isinstance(model, type):
-        return isinstance(model, _SupportsLoRAType)
-
-    return isinstance(model, SupportsLoRA)
-
-
 class _MakeEmptyIntermediateTensors(Protocol):
     def __call__(
         self,

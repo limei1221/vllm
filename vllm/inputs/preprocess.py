@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-from collections.abc import Mapping
 from typing import Any, overload
 
 from typing_extensions import assert_never
@@ -9,7 +8,6 @@ from typing_extensions import assert_never
 from vllm.config import VllmConfig
 from vllm.inputs import build_enc_dec_input
 from vllm.logger import init_logger
-from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from vllm.renderers import BaseRenderer, renderer_from_config
 from vllm.renderers.inputs import (
     DecoderDictPrompt,
@@ -28,15 +26,12 @@ from .engine import (
     EncoderDecoderInput,
     EncoderInput,
     EngineInput,
-    MultiModalInput,
     SingletonInput,
     TokensInput,
     tokens_input,
 )
 from .llm import (
     EmbedsPrompt,
-    MultiModalDataDict,
-    MultiModalUUIDDict,
     PromptType,
     TextPrompt,
     TokensPrompt,
@@ -50,13 +45,11 @@ class InputPreprocessor:
         self,
         vllm_config: VllmConfig,
         renderer: BaseRenderer | None = None,
-        mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
     ) -> None:
         super().__init__()
 
         self.model_config = vllm_config.model_config
         self.renderer = renderer or renderer_from_config(vllm_config)
-        self.mm_registry = mm_registry
 
     @property
     def tokenizer(self) -> TokenizerLike | None:
@@ -87,27 +80,6 @@ class InputPreprocessor:
 
         return tok_prompt["prompt_token_ids"]
 
-    def _process_multimodal(
-        self,
-        prompt: str | list[int],
-        mm_data: MultiModalDataDict,
-        mm_processor_kwargs: Mapping[str, object] | None = None,
-        tokenization_kwargs: dict[str, Any] | None = None,
-        *,
-        mm_uuids: MultiModalUUIDDict | None = None,
-    ) -> MultiModalInput:
-        """
-        Apply the model's multi-modal processor to a multi-modal prompt,
-        returning the corresponding token IDs and metadata.
-        """
-        return self.renderer._process_multimodal(
-            prompt,
-            mm_data,
-            mm_uuids=mm_uuids,
-            mm_processor_kwargs=mm_processor_kwargs,
-            tokenization_kwargs=tokenization_kwargs,
-        )
-
     def _process_embeds(
         self,
         parsed_content: EmbedsPrompt,
@@ -134,22 +106,12 @@ class InputPreprocessor:
         self,
         parsed_content: TokensPrompt,
         tokenization_kwargs: dict[str, Any] | None = None,
-    ) -> TokensInput | MultiModalInput:
+    ) -> TokensInput:
         prompt_token_ids = self._truncate_inputs(
             parsed_content["prompt_token_ids"], tokenization_kwargs
         )
 
-        inputs: TokensInput | MultiModalInput
-        if multi_modal_data := parsed_content.get("multi_modal_data"):
-            inputs = self._process_multimodal(
-                prompt_token_ids,
-                multi_modal_data,
-                parsed_content.get("mm_processor_kwargs"),
-                tokenization_kwargs=tokenization_kwargs,
-                mm_uuids=parsed_content.get("multi_modal_uuids"),
-            )
-        else:
-            inputs = tokens_input(prompt_token_ids)
+        inputs = tokens_input(prompt_token_ids)
 
         if prompt_text := parsed_content.get("prompt"):
             inputs["prompt"] = prompt_text
@@ -162,23 +124,14 @@ class InputPreprocessor:
         self,
         parsed_content: TextPrompt,
         tokenization_kwargs: dict[str, Any] | None = None,
-    ) -> TokensInput | MultiModalInput:
+    ) -> TokensInput:
         prompt_text = parsed_content["prompt"]
 
-        inputs: TokensInput | MultiModalInput
-        if multi_modal_data := parsed_content.get("multi_modal_data"):
-            inputs = self._process_multimodal(
-                prompt_text,
-                multi_modal_data,
-                parsed_content.get("mm_processor_kwargs") or {},
-                tokenization_kwargs=tokenization_kwargs,
-            )
-        else:
-            prompt_token_ids = self._tokenize_prompt(
-                prompt_text,
-                tokenization_kwargs=tokenization_kwargs,
-            )
-            inputs = tokens_input(prompt_token_ids)
+        prompt_token_ids = self._tokenize_prompt(
+            prompt_text,
+            tokenization_kwargs=tokenization_kwargs,
+        )
+        inputs = tokens_input(prompt_token_ids)
 
         inputs["prompt"] = prompt_text
 
@@ -236,13 +189,6 @@ class InputPreprocessor:
         decoder_prompt = prompt["decoder_prompt"]
 
         skip_decoder_start_token = False
-        if self.renderer.mm_processor is not None:
-            from vllm.multimodal.processing import EncDecMultiModalProcessor
-
-            if isinstance(self.renderer.mm_processor, EncDecMultiModalProcessor):
-                skip_decoder_start_token = (
-                    self.renderer.mm_processor.skip_decoder_start_token
-                )
 
         return build_enc_dec_input(
             encoder_input=self._prompt_to_llm_inputs(

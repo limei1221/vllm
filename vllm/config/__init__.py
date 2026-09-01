@@ -85,7 +85,6 @@ __all__ = [
     "KVTransferConfig",
     # From vllm.config.load
     "LoadConfig",
-    # From vllm.config.lora
     # From vllm.config.mamba
     "MambaConfig",
     # From vllm.config.model

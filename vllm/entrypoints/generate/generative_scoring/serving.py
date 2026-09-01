@@ -224,12 +224,6 @@ class ServingGenerativeScoring(BaseServing):
         # Note: Mixed item types (string and token list) are validated by
         # Pydantic at request parsing time, so we don't need to check here.
 
-        try:
-            lora_request = self._maybe_get_adapters(request)  # type: ignore[arg-type]
-        except (ValueError, TypeError, RuntimeError) as e:
-            logger.exception("Error preparing request components")
-            return self.create_error_response(e)
-
         base_id = self._base_request_id(raw_request, default=request.request_id)
         request_id = f"generative-scoring-{base_id}"
         created_time = int(time.time())
@@ -272,14 +266,12 @@ class ServingGenerativeScoring(BaseServing):
                 request_id_item,
                 engine_input,
                 params=sampling_params,
-                lora_request=lora_request,
             )
 
             generator = self.engine_client.generate(
                 engine_input,
                 sampling_params,
                 request_id_item,
-                lora_request=lora_request,
                 trace_headers=trace_headers,
                 priority=request.priority,
             )
@@ -365,7 +357,7 @@ class ServingGenerativeScoring(BaseServing):
             total_completion_tokens += len(output.token_ids)
 
         # Build response
-        model_name = self.models.model_name(lora_request)
+        model_name = self.models.model_name()
         response = GenerativeScoringResponse(
             id=request_id,
             created=created_time,

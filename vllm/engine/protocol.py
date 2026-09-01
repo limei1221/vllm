@@ -12,7 +12,6 @@ from vllm.distributed.weight_transfer.base import (
     WeightTransferUpdateRequest,
 )
 from vllm.inputs import EngineInput, PromptType
-from vllm.lora.request import LoRARequest
 from vllm.outputs import PoolingRequestOutput, RequestOutput
 from vllm.pooling_params import PoolingParams
 from vllm.renderers import BaseRenderer
@@ -73,7 +72,6 @@ class EngineClient(ABC):
         request_id: str,
         *,
         prompt_text: str | None = None,
-        lora_request: LoRARequest | None = None,
         tokenization_kwargs: dict[str, Any] | None = None,
         trace_headers: Mapping[str, str] | None = None,
         priority: int = 0,
@@ -91,7 +89,6 @@ class EngineClient(ABC):
         prompt: PromptType | EngineInput,
         pooling_params: PoolingParams,
         request_id: str,
-        lora_request: LoRARequest | None = None,
         trace_headers: Mapping[str, str] | None = None,
         priority: int = 0,
         tokenization_kwargs: dict[str, Any] | None = None,
@@ -175,11 +172,6 @@ class EngineClient(ABC):
     @abstractmethod
     async def is_sleeping(self) -> bool:
         """Check whether the engine is sleeping"""
-        ...
-
-    @abstractmethod
-    async def add_lora(self, lora_request: LoRARequest) -> bool:
-        """Load a new LoRA adapter into the engine for future requests."""
         ...
 
     @abstractmethod

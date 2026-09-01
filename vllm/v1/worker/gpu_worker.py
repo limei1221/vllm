@@ -51,9 +51,7 @@ from vllm.distributed.weight_transfer import (
     WeightTransferEngineFactory,
 )
 from vllm.logger import init_logger
-from vllm.lora.request import LoRARequest
 from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
-from vllm.multimodal.gpu_ipc_memory import reserve_mm_ipc_gpu_memory
 from vllm.platforms import current_platform
 from vllm.profiler.wrapper import (
     CudaProfilerWrapper,
@@ -502,11 +500,7 @@ class Worker(WorkerBase):
                 "correspondingly."
             )
             logger.info(msg)
-            return reserve_mm_ipc_gpu_memory(
-                kv_cache_memory_bytes,
-                self.model_config.multimodal_config,
-                getattr(self.parallel_config, "_api_process_count", 1),
-            )
+            return kv_cache_memory_bytes
 
         # Execute a forward pass with dummy inputs to profile the memory usage
         # of the model.
@@ -617,11 +611,7 @@ class Worker(WorkerBase):
                     suggested_util,
                 )
 
-        return reserve_mm_ipc_gpu_memory(
-            int(self.available_kv_cache_memory_bytes),
-            self.model_config.multimodal_config,
-            getattr(self.parallel_config, "_api_process_count", 1),
-        )
+        return int(self.available_kv_cache_memory_bytes)
 
     def get_kv_connector_handshake_metadata(
         self,
@@ -718,8 +708,7 @@ class Worker(WorkerBase):
         # We skip EPLB here since we don't want to record dummy metrics
         for size in sorted(warmup_sizes, reverse=True):
             logger.info("Compile and warming up model for size %d", size)
-            self.model_runner._dummy_run(size, skip_eplb=True, remove_lora=False)
-        self.model_runner.maybe_remove_all_loras(self.model_runner.lora_config)
+            self.model_runner._dummy_run(size, skip_eplb=True)
 
         # Warmup and tune the kernels used during model execution before
         # cuda graph capture.
@@ -823,10 +812,7 @@ class Worker(WorkerBase):
                 skip_eplb=True,
                 cudagraph_runtime_mode=CUDAGraphMode.NONE,
             )
-            if self.model_runner.is_pooling_model:
-                self.model_runner._dummy_pooler_run(hidden_states)
-            else:
-                self.model_runner._dummy_sampler_run(hidden_states=last_hidden_states)
+            self.model_runner._dummy_sampler_run(hidden_states=last_hidden_states)
 
         # Reset the seed to ensure that the random state is not affected by
         # the model initialization and profiling.
@@ -921,10 +907,6 @@ class Worker(WorkerBase):
         from vllm.compilation.passes.vllm_inductor_pass import get_match_table
 
         return get_match_table()
-
-    def get_encoder_timing_stats(self) -> dict[str, dict[str, float | int]]:
-        """Get encoder timing stats from model runner."""
-        return self.model_runner.get_encoder_timing_stats()
 
     def annotate_profile(self, scheduler_output):
         # add trace annotation so that we can easily distinguish
@@ -1111,12 +1093,6 @@ class Worker(WorkerBase):
             output = self.model_runner.execute_model(
                 scheduler_output, intermediate_tensors
             )
-            if (
-                self.use_v2_model_runner
-                and self.model_runner.is_pooling_model
-                and output is None
-            ):
-                output = self.model_runner.pool()  # type: ignore
             if isinstance(
                 output, ModelRunnerOutput | AsyncModelRunnerOutput | NoneType
             ):
@@ -1208,18 +1184,6 @@ class Worker(WorkerBase):
     def execute_dummy_batch(self) -> None:
         num_tokens = getattr(self.model_runner, "uniform_decode_query_len", 1)
         self.model_runner._dummy_run(num_tokens, uniform_decode=True)
-
-    def add_lora(self, lora_request: LoRARequest) -> bool:
-        return self.model_runner.add_lora(lora_request)
-
-    def remove_lora(self, lora_id: int) -> bool:
-        return self.model_runner.remove_lora(lora_id)
-
-    def list_loras(self) -> set[int]:
-        return self.model_runner.list_loras()
-
-    def pin_lora(self, lora_id: int) -> bool:
-        return self.model_runner.pin_lora(lora_id)
 
     def check_health(self) -> None:
         # worker will always be healthy as long as it's running.
@@ -1343,10 +1307,6 @@ class Worker(WorkerBase):
             self.weight_transfer_engine.finish_weight_update()
             self.weight_transfer_engine.reset_weight_update_target()
             self._weight_update_active = False
-
-        # Weight transfer bypasses GPUModelRunner.reload_weights().
-        if not self._weight_update_is_draft:
-            self.model_runner.reset_lora_state()
 
     def shutdown(self) -> None:
         gc.unfreeze()

@@ -28,7 +28,6 @@ from vllm.entrypoints.serve.utils.request_logger import RequestLogger
 from vllm.inputs import EngineInput
 from vllm.logger import init_logger
 from vllm.logprobs import Logprob, PromptLogprobs
-from vllm.lora.request import LoRARequest
 from vllm.tokenizers import TokenizerLike
 from vllm.tracing import (
     contains_trace_headers,
@@ -107,7 +106,6 @@ class ServeContext(Generic[RequestT]):
     model_name: str
     request_id: str
     created_time: int = field(default_factory=lambda: int(time.time()))
-    lora_request: LoRARequest | None = None
     engine_inputs: list[EngineInput] | None = None
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

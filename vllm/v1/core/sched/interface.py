@@ -5,8 +5,6 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
-from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
-
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
     from vllm.config.kv_events import KVEventsConfig
@@ -18,7 +16,6 @@ if TYPE_CHECKING:
     from vllm.v1.metrics.stats import SchedulerStats
     from vllm.v1.outputs import DraftTokenIds, ModelRunnerOutput
     from vllm.v1.request import Request, RequestStatus
-    from vllm.v1.structured_output import StructuredOutputManager
 
 
 class PauseState(enum.IntEnum):
@@ -41,10 +38,8 @@ class SchedulerInterface(ABC):
         self,
         vllm_config: "VllmConfig",
         kv_cache_config: "KVCacheConfig",
-        structured_output_manager: "StructuredOutputManager",
         block_size: int,
         hash_block_size: int,
-        mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
         include_finished_set: bool = False,
         log_stats: bool = False,
     ) -> None:

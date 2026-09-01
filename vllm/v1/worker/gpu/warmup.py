@@ -10,7 +10,6 @@ import torch
 
 from vllm import PoolingParams, SamplingParams
 from vllm.logger import init_logger
-from vllm.multimodal.inputs import MultiModalFeatureSpec, PlaceholderRange
 from vllm.utils.math_utils import cdiv
 from vllm.v1.core.sched.output import (
     CachedRequestData,
@@ -135,12 +134,10 @@ def run_mixed_prefill_decode_warmup(
         NewRequestData(
             req_id=decode_req_id,
             prompt_token_ids=decode_token_ids,
-            mm_features=[],
             sampling_params=sampling_params,
             pooling_params=None,
             block_ids=tuple(_alloc_blocks(n) for n in decode_prefill_block_counts),
             num_computed_tokens=0,
-            lora_request=None,
             prefill_token_ids=decode_token_ids,
         ),
     ]
@@ -165,12 +162,10 @@ def run_mixed_prefill_decode_warmup(
         NewRequestData(
             req_id=prefill_req_id,
             prompt_token_ids=prefill_token_ids,
-            mm_features=[],
             sampling_params=sampling_params,
             pooling_params=None,
             block_ids=tuple(_alloc_blocks(n) for n in prefill_block_counts),
             num_computed_tokens=0,
-            lora_request=None,
             prefill_token_ids=prefill_token_ids,
         ),
     ]
@@ -230,22 +225,6 @@ def warmup_kernels(
     kv_cache_groups = model_runner.kv_cache_config.kv_cache_groups
     num_kv_cache_groups = len(kv_cache_groups)
 
-    # Encoder-decoder models: give each warmup request a dummy encoder input so
-    # cross-attention warms up over a realistic, non-empty key sequence.
-    # The dummy mm_feature is registered in the encoder cache and only its encoder
-    # length is read (not the inputs themselves); the encoder itself is not scheduled.
-    max_encoder_len = getattr(model_runner.model_state, "max_encoder_len", 0)
-    warmup_mm_features: list[MultiModalFeatureSpec] = []
-    if model_runner.is_encoder_decoder and max_encoder_len:
-        warmup_mm_features = [
-            MultiModalFeatureSpec(
-                data=None,
-                modality="",
-                identifier="_warmup_encoder",
-                mm_position=PlaceholderRange(offset=0, length=max_encoder_len),
-            )
-        ]
-
     # Compute per-request block counts for each KV cache group.
     block_count = _warmup_block_counter(model_runner)
     kv_cache_specs = [g.kv_cache_spec for g in kv_cache_groups]
@@ -300,7 +279,6 @@ def warmup_kernels(
                 prompt_token_ids,
                 sampling_params,
                 pooling_params,
-                mm_features=warmup_mm_features,
             ),
             block_ids=tuple(_alloc_blocks(n) for n in prefill_block_counts),
             prefill_token_ids=prompt_token_ids,

@@ -149,8 +149,6 @@ class OpenAIServingCompletion(GenerateBaseServing):
         if raw_request:
             raw_request.state.request_metadata = request_metadata
 
-        lora_request = self._maybe_get_adapters(request)
-
         # Extract data_parallel_rank from header (router can inject it)
         data_parallel_rank = self._get_data_parallel_rank(raw_request)
 
@@ -184,7 +182,6 @@ class OpenAIServingCompletion(GenerateBaseServing):
                 request_id_item,
                 engine_input,
                 params=sampling_params,
-                lora_request=lora_request,
             )
 
             trace_headers = (
@@ -199,7 +196,6 @@ class OpenAIServingCompletion(GenerateBaseServing):
                     prompt=engine_input,
                     request_id=request_id,
                     params=sampling_params,
-                    lora_request=lora_request,
                     trace_headers=trace_headers,
                     session_id=session_id,
                 )
@@ -208,7 +204,6 @@ class OpenAIServingCompletion(GenerateBaseServing):
                     engine_input,
                     sampling_params,
                     request_id_item,
-                    lora_request=lora_request,
                     trace_headers=trace_headers,
                     priority=self._get_priority(request, raw_request),
                     data_parallel_rank=data_parallel_rank,
@@ -219,7 +214,7 @@ class OpenAIServingCompletion(GenerateBaseServing):
 
         result_generator = merge_async_iterators(*generators)
 
-        model_name = self.models.model_name(lora_request)
+        model_name = self.models.model_name()
         num_prompts = len(engine_inputs)
 
         # Streaming response

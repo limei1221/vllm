@@ -12,8 +12,6 @@ import numpy as np
 import torch
 
 from vllm.config.kv_events import KVEventsConfig
-from vllm.lora.request import LoRARequest
-from vllm.multimodal.inputs import MultiModalFeatureSpec
 from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingParams
 from vllm.v1.metrics.stats import PrefillStats, SchedulerStats
@@ -105,11 +103,9 @@ class EngineCoreRequest(
 ):  # type: ignore[call-arg]
     request_id: str
     prompt_token_ids: list[int] | None
-    mm_features: list[MultiModalFeatureSpec] | None
     sampling_params: SamplingParams | None
     pooling_params: PoolingParams | None
     arrival_time: float
-    lora_request: LoRARequest | None
     cache_salt: str | None
     data_parallel_rank: int | None
     prompt_embeds: torch.Tensor | None = None

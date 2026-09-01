@@ -7,7 +7,6 @@ from itertools import product
 from vllm.config import CUDAGraphMode, VllmConfig
 from vllm.forward_context import BatchDescriptor
 from vllm.logger import init_logger
-from vllm.lora.utils import get_captured_lora_counts
 
 logger = init_logger(__name__)
 
@@ -61,11 +60,6 @@ class CudagraphDispatcher:
         )
 
         self.keys_initialized = False
-        self.specialize_lora_count = (
-            self.vllm_config.lora_config.specialize_active_lora
-            if self.vllm_config.lora_config is not None
-            else False
-        )
         # Default cudagraph_mode to NONE until initialize_cudagraph_keys is called
         self.cudagraph_mode = CUDAGraphMode.NONE
 
@@ -109,25 +103,8 @@ class CudagraphDispatcher:
                         )
 
     def _get_lora_cases(self) -> list[int]:
-        """
-        Returns list of has_lora values for CUDA graph capture.
-        This is the single source of truth for LoRA capture cases.
-        """
-        lora_config = self.vllm_config.lora_config
-        if lora_config is None:
-            # No LoRA configured - single case with no LoRA
-            return [0]
-
-        # LoRA is enabled - capture graphs based on cudagraph_specialize_lora
-        if self.compilation_config.cudagraph_specialize_lora:
-            captured_counts = get_captured_lora_counts(
-                lora_config.max_loras, self.specialize_lora_count
-            )
-            # Specialize: capture separate graphs for with and without LoRA
-            return [0] + captured_counts
-        else:
-            # No specialization: only capture graphs with LoRA active
-            return [lora_config.max_loras + 1]
+        """Return the LoRA capture cases; this build has no LoRA, so one case."""
+        return [0]
 
     def _create_padded_batch_descriptor(
         self,
@@ -281,23 +258,6 @@ class CudagraphDispatcher:
             return CUDAGraphMode.NONE, BatchDescriptor(num_tokens)
 
         effective_num_active_loras = num_active_loras
-        if has_lora and num_active_loras > 0:
-            if self.specialize_lora_count:
-                # Find the smallest captured `num_active_loras` that is >= the current
-                # `num_active_loras`. This is because we only capture graphs for
-                # a subset of possible `num_active_loras` values (powers of 2).
-                import bisect
-
-                idx = bisect.bisect_left(self.captured_lora_counts, num_active_loras)
-                if idx < len(self.captured_lora_counts):
-                    effective_num_active_loras = self.captured_lora_counts[idx]
-            else:
-                # When not specializing, graphs are captured only with max_loras + 1,
-                # so we must use max_loras + 1 for dispatch to find a matching graph.
-                assert self.vllm_config.lora_config is not None, (
-                    "LoRA config must be set when has_lora is True."
-                )
-                effective_num_active_loras = self.vllm_config.lora_config.max_loras + 1
 
         normalized_uniform = uniform_decode and self.cudagraph_mode.separate_routine()
         batch_desc = self._create_padded_batch_descriptor(

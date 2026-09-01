@@ -24,8 +24,6 @@ from vllm.entrypoints.serve.elastic_ep.middleware import set_scaling_elastic_ep
 from vllm.exceptions import VLLMClientError, VLLMValidationError
 from vllm.inputs import EngineInput, PromptType
 from vllm.logger import init_logger
-from vllm.lora.request import LoRARequest
-from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from vllm.outputs import STREAM_FINISHED, PoolingRequestOutput, RequestOutput
 from vllm.pooling_params import PoolingParams
 from vllm.renderers import renderer_from_config
@@ -78,7 +76,6 @@ class AsyncLLM(EngineClient):
         executor_class: type[Executor],
         log_stats: bool,
         usage_context: UsageContext = UsageContext.ENGINE_CONTEXT,
-        mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
         log_requests: bool = True,
         start_engine_loop: bool = True,
         stat_loggers: list[StatLoggerFactory] | None = None,
@@ -95,7 +92,6 @@ class AsyncLLM(EngineClient):
             executor_class: an Executor impl, e.g. MultiprocExecutor.
             log_stats: Whether to log stats.
             usage_context: Usage context of the LLM.
-            mm_registry: Multi-modal registry.
             log_requests: Whether to log requests.
             start_engine_loop: Whether to start the engine loop.
             stat_loggers: customized stat loggers for the engine.
@@ -289,7 +285,6 @@ class AsyncLLM(EngineClient):
         | AsyncGenerator[StreamingInput, None],
         params: SamplingParams | PoolingParams,
         arrival_time: float | None = None,
-        lora_request: LoRARequest | None = None,
         tokenization_kwargs: dict[str, Any] | None = None,
         trace_headers: Mapping[str, str] | None = None,
         priority: int = 0,
@@ -327,7 +322,6 @@ class AsyncLLM(EngineClient):
                 prompt,
                 params,
                 arrival_time,
-                lora_request,
                 tokenization_kwargs,
                 trace_headers,
                 priority,
@@ -359,7 +353,6 @@ class AsyncLLM(EngineClient):
                     params,
                     supported_tasks=await self.get_supported_tasks(),
                     arrival_time=arrival_time,
-                    lora_request=lora_request,
                     tokenization_kwargs=tokenization_kwargs,
                     trace_headers=trace_headers,
                     priority=priority,
@@ -375,7 +368,6 @@ class AsyncLLM(EngineClient):
                     params,
                     supported_tasks=await self.get_supported_tasks(),
                     arrival_time=arrival_time,
-                    lora_request=lora_request,
                     tokenization_kwargs=tokenization_kwargs,
                     trace_headers=trace_headers,
                     priority=priority,
@@ -444,7 +436,6 @@ class AsyncLLM(EngineClient):
         input_stream: AsyncGenerator[StreamingInput, None],
         sampling_params: SamplingParams | PoolingParams,
         arrival_time: float | None = None,
-        lora_request: LoRARequest | None = None,
         tokenization_kwargs: dict[str, Any] | None = None,
         trace_headers: Mapping[str, str] | None = None,
         priority: int = 0,
@@ -456,7 +447,6 @@ class AsyncLLM(EngineClient):
         inputs = dict(
             supported_tasks=await self.get_supported_tasks(),
             arrival_time=arrival_time,
-            lora_request=lora_request,
             tokenization_kwargs=tokenization_kwargs,
             trace_headers=trace_headers,
             priority=priority,
@@ -557,7 +547,6 @@ class AsyncLLM(EngineClient):
         request_id: str,
         *,
         prompt_text: str | None = None,
-        lora_request: LoRARequest | None = None,
         tokenization_kwargs: dict[str, Any] | None = None,
         trace_headers: Mapping[str, str] | None = None,
         priority: int = 0,
@@ -587,7 +576,6 @@ class AsyncLLM(EngineClient):
                 request_id,
                 prompt,
                 sampling_params,
-                lora_request=lora_request,
                 tokenization_kwargs=tokenization_kwargs,
                 trace_headers=trace_headers,
                 priority=priority,
@@ -773,14 +761,12 @@ class AsyncLLM(EngineClient):
         request = EngineCoreRequest(
             request_id=request_id,
             prompt_token_ids=[0],
-            mm_features=None,
             sampling_params=SamplingParams(
                 max_tokens=1,
                 extra_args={"kv_transfer_params": dict(kv_transfer_params)},
             ),
             pooling_params=None,
             arrival_time=time.time(),
-            lora_request=None,
             cache_salt=None,
             data_parallel_rank=data_parallel_rank,
             abort_immediately=True,
@@ -845,7 +831,6 @@ class AsyncLLM(EngineClient):
         prompt: PromptType | EngineInput,
         pooling_params: PoolingParams,
         request_id: str,
-        lora_request: LoRARequest | None = None,
         trace_headers: Mapping[str, str] | None = None,
         priority: int = 0,
         tokenization_kwargs: dict[str, Any] | None = None,
@@ -871,7 +856,6 @@ class AsyncLLM(EngineClient):
                 request_id,
                 prompt,
                 pooling_params,
-                lora_request=lora_request,
                 tokenization_kwargs=tokenization_kwargs,
                 trace_headers=trace_headers,
                 priority=priority,
@@ -990,22 +974,6 @@ class AsyncLLM(EngineClient):
 
     async def is_sleeping(self) -> bool:
         return await self.engine_core.is_sleeping_async()
-
-    async def add_lora(self, lora_request: LoRARequest) -> bool:
-        """Load a new LoRA adapter into the engine for future requests."""
-        return await self.engine_core.add_lora_async(lora_request)
-
-    async def remove_lora(self, lora_id: int) -> bool:
-        """Remove an already loaded LoRA adapter."""
-        return await self.engine_core.remove_lora_async(lora_id)
-
-    async def list_loras(self) -> set[int]:
-        """List all registered adapters."""
-        return await self.engine_core.list_loras_async()
-
-    async def pin_lora(self, lora_id: int) -> bool:
-        """Prevent an adapter from being evicted."""
-        return await self.engine_core.pin_lora_async(lora_id)
 
     async def collective_rpc(
         self,

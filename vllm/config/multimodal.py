@@ -9,7 +9,6 @@ import torch
 from pydantic import ConfigDict, Field, field_validator, model_validator
 from pydantic.dataclasses import dataclass
 
-import vllm.envs as envs
 from vllm.config.ec_transfer import ECTransferConfig
 from vllm.config.utils import config, get_from_deprecated_env_if_set
 from vllm.logger import init_logger
@@ -515,18 +514,11 @@ class MultiModalConfig:
         return kwargs | dict(inference_kwargs)
 
     def use_gpu_video_backend(self) -> bool:
-        """Return whether the configured video loader or codec uses the GPU."""
-        from vllm.multimodal.video import VIDEO_LOADER_REGISTRY
+        """Return whether the configured video loader or codec uses the GPU.
 
-        video_kwargs = self.media_io_kwargs.get("video", {})
-        video_loader_backend = (
-            video_kwargs.get("video_backend") or envs.VLLM_VIDEO_LOADER_BACKEND
-        )
-        codec_backend = video_kwargs.get("backend")
-        return VIDEO_LOADER_REGISTRY.backend_requires_gpu(video_loader_backend) or (
-            codec_backend is not None
-            and VIDEO_LOADER_REGISTRY.backend_requires_gpu(codec_backend)
-        )
+        This build has no video backends, so it never does.
+        """
+        return False
 
     def is_multimodal_pruning_enabled(self):
         return self.get_video_pruning_spec() is not None

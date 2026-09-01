@@ -15,7 +15,6 @@ from vllm.config import (
 from vllm.logger import init_logger
 from vllm.model_executor.layers.attention import Attention
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
-from vllm.multimodal.inputs import MultiModalFeatureSpec
 from vllm.utils.torch_utils import get_dtype_size
 from vllm.v1.attention.backend import (
     AttentionCGSupport,
@@ -683,7 +682,7 @@ def build_attn_metadata(
 
 def compute_mm_prefix_ranges(
     req_ids: list[str],
-    mm_features: dict[str, list[MultiModalFeatureSpec]],
+    mm_features: dict[str, list] | None = None,
     sliding_window: int | None = None,
 ) -> dict[int, list[tuple[int, int]]]:
     """Compute PrefixLM bidirectional ranges for multimodal tokens.
@@ -692,9 +691,10 @@ def compute_mm_prefix_ranges(
     from attending across the entire image span.
     """
     req_doc_ranges: dict[int, list[tuple[int, int]]] = {}
+    features = mm_features or {}
     for req_idx, req_id in enumerate(req_ids):
         image_doc_ranges = []
-        for mm_feature in mm_features.get(req_id, ()):
+        for mm_feature in features.get(req_id, ()):
             if mm_feature.modality not in ("image", "video"):
                 continue
             for r in mm_feature.mm_position.extract_embeds_range():

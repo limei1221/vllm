@@ -7,6 +7,7 @@ from abc import abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
+from typing import Any
 
 from openai.types.responses import ToolChoiceFunction
 from pydantic import TypeAdapter, ValidationError
@@ -29,16 +30,17 @@ from vllm.entrypoints.openai.responses.protocol import ResponsesRequest
 from vllm.logger import init_logger
 from vllm.parser.metrics import record_tool_parser_invocation
 from vllm.parser.utils import count_history_tool_calls
-from vllm.reasoning.abs_reasoning_parsers import ReasoningParser
 from vllm.sampling_params import StructuredOutputsParams
 from vllm.tokenizers import TokenizerLike
-from vllm.tool_parsers.abstract_tool_parser import Tool, ToolParser
-from vllm.tool_parsers.streaming import (
-    extract_named_tool_call_streaming,
-    extract_required_tool_call_streaming,
-)
 
 logger = init_logger(__name__)
+
+# Reasoning and tool parsers are not part of this build. The parser plumbing
+# is retained so the chat path keeps its shape, but both sub-parsers are
+# always None and the delegating paths below are unreachable.
+ReasoningParser = Any
+ToolParser = Any
+Tool = Any
 
 
 @dataclass
@@ -690,28 +692,16 @@ class DelegatingParser(Parser):
                 (ToolChoiceFunction, ChatCompletionNamedToolChoiceParam),
             )
         ):
-            delta_message, function_name_returned = extract_named_tool_call_streaming(
-                delta_text=delta_text,
-                function_name=self._get_function_name(request),
-                function_name_returned=function_name_returned,
-                tool_call_idx=tool_call_idx,
-                tool_call_id_type=tool_call_id_type,
-                tokenizer=self.model_tokenizer,
+            raise NotImplementedError(
+                "Named tool choice requires a tool parser, which this build "
+                "does not provide."
             )
-            return delta_message, function_name_returned
 
         if supports_required_and_named and request.tool_choice == "required":
-            delta_message, function_name_returned = (
-                extract_required_tool_call_streaming(
-                    previous_text=previous_text,
-                    current_text=current_text,
-                    delta_text=delta_text,
-                    function_name_returned=function_name_returned,
-                    tool_call_idx=tool_call_idx,
-                    tool_call_id_type=tool_call_id_type,
-                )
+            raise NotImplementedError(
+                'tool_choice="required" requires a tool parser, which this '
+                "build does not provide."
             )
-            return delta_message, function_name_returned
         return self.extract_tool_calls_streaming(
             previous_text,
             current_text,

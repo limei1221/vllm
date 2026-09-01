@@ -14,9 +14,7 @@ from vllm.entrypoints.openai.models.serving import (
 from vllm.entrypoints.serve import create_error_response
 from vllm.entrypoints.serve.engine.typing import AnyRequest
 from vllm.entrypoints.serve.utils.request_logger import RequestLogger
-from vllm.exceptions import VLLMNotFoundError
 from vllm.inputs import EngineInput
-from vllm.lora.request import LoRARequest
 from vllm.renderers.inputs.preprocess import (
     extract_prompt_components,
     extract_prompt_len,
@@ -44,20 +42,6 @@ class BaseServing:
 
         if self._is_model_supported(request.model):
             return None
-        if request.model in self.models.lora_requests:
-            return None
-        if (
-            envs.VLLM_ALLOW_RUNTIME_LORA_UPDATING
-            and request.model
-            and (load_result := await self.models.resolve_lora(request.model))
-        ):
-            if isinstance(load_result, LoRARequest):
-                return None
-            if (
-                isinstance(load_result, ErrorResponse)
-                and load_result.error.code == HTTPStatus.BAD_REQUEST.value
-            ):
-                error_response = load_result
 
         return error_response or self.create_error_response(
             message=f"The model `{request.model}` does not exist.",
@@ -96,7 +80,6 @@ class BaseServing:
         request_id: str,
         inputs: PromptType | EngineInput,
         params: SamplingParams | BeamSearchParams | None,
-        lora_request: LoRARequest | None,
     ) -> None:
         if self.request_logger is None:
             return
@@ -109,7 +92,6 @@ class BaseServing:
             components.token_ids,
             components.embeds,
             params=params,
-            lora_request=lora_request,
         )
 
     @staticmethod
@@ -148,49 +130,3 @@ class BaseServing:
                     if "type" in content_dict:
                         message_types.add(content_dict["type"].split("_")[0])
         return message_types
-
-    def _get_active_default_mm_loras(
-        self, request: AnyRequest
-    ) -> LoRARequest | None:
-        """Determine if there are any active default multimodal loras."""
-        # TODO: Currently this is only enabled for chat completions
-        # to be better aligned with only being enabled for .generate
-        # when run offline. It would be nice to support additional
-        # tasks types in the future.
-        message_types = self._get_message_types(request)
-        default_mm_loras = set()
-
-        for lora in self.models.lora_requests.values():
-            # Best effort match for default multimodal lora adapters;
-            # There is probably a better way to do this, but currently
-            # this matches against the set of 'types' in any content lists
-            # up until '_', e.g., to match audio_url -> audio
-            if lora.lora_name in message_types:
-                default_mm_loras.add(lora)
-
-        # Currently only support default modality specific loras if
-        # we have exactly one lora matched on the request.
-        if len(default_mm_loras) == 1:
-            return default_mm_loras.pop()
-        return None
-
-    def _maybe_get_adapters(
-        self,
-        request: AnyRequest,
-        supports_default_mm_loras: bool = False,
-    ) -> LoRARequest | None:
-        if request.model in self.models.lora_requests:
-            return self.models.lora_requests[request.model]
-
-        # Currently only support default modality specific loras
-        # if we have exactly one lora matched on the request.
-        if supports_default_mm_loras:
-            default_mm_lora = self._get_active_default_mm_loras(request)
-            if default_mm_lora is not None:
-                return default_mm_lora
-
-        if self._is_model_supported(request.model):
-            return None
-
-        # if _check_model has been called earlier, this will be unreachable
-        raise VLLMNotFoundError(f"The model `{request.model}` does not exist.")

@@ -38,10 +38,9 @@ from vllm.entrypoints.chat_utils import (
     ChatTemplateContentFormatOption,
     load_chat_template,
 )
-from .offline_utils import _O, _R, OfflineInferenceMixinfrom vllm.entrypoints.serve.utils.api_utils import log_non_default_args
+from vllm.entrypoints.serve.utils.api_utils import log_non_default_args
 from vllm.inputs import PromptType
 from vllm.logger import init_logger
-from vllm.lora.request import LoRARequest
 from vllm.model_executor.layers.quantization import QuantizationMethods
 from vllm.outputs import PoolingRequestOutput, RequestOutput
 from vllm.platforms import current_platform
@@ -372,7 +371,6 @@ class LLM(OfflineInferenceMixin):
                 self.model_config.renderer_num_workers,
             )
 
-
         # Cache for __repr__ to avoid repeated collective_rpc calls
         self._cached_repr: str | None = None
 
@@ -418,7 +416,6 @@ class LLM(OfflineInferenceMixin):
         sampling_params: SamplingParams | Sequence[SamplingParams] | None = None,
         *,
         use_tqdm: bool | Callable[..., tqdm] = True,
-        lora_request: Sequence[LoRARequest] | LoRARequest | None = None,
         priority: list[int] | None = None,
         tokenization_kwargs: dict[str, Any] | None = None,
         mm_processor_kwargs: dict[str, Any] | None = None,
@@ -442,7 +439,6 @@ class LLM(OfflineInferenceMixin):
                 If a callable (e.g., `functools.partial(tqdm, leave=False)`),
                 it is used to create the progress bar.
                 If `False`, no progress bar is created.
-            lora_request: LoRA request to use for generation, if any.
             priority: The priority of the requests, if any.
                 Only applicable when priority scheduling policy is enabled.
                 If provided, must be a list of integers matching the length
@@ -471,7 +467,6 @@ class LLM(OfflineInferenceMixin):
             params=sampling_params,
             output_type=RequestOutput,
             use_tqdm=use_tqdm,
-            lora_request=lora_request,
             tokenization_kwargs=tokenization_kwargs,
             priority=priority,
             mm_processor_kwargs=mm_processor_kwargs,
@@ -481,7 +476,6 @@ class LLM(OfflineInferenceMixin):
         self,
         prompts: PromptType | Sequence[PromptType],
         sampling_params: SamplingParams | Sequence[SamplingParams] | None = None,
-        lora_request: Sequence[LoRARequest] | LoRARequest | None = None,
         priority: list[int] | None = None,
         use_tqdm: bool | Callable[..., tqdm] = True,
         tokenization_kwargs: dict[str, Any] | None = None,
@@ -496,7 +490,6 @@ class LLM(OfflineInferenceMixin):
         Args:
             prompts: The prompts to the LLM. See generate() for details.
             sampling_params: The sampling parameters for text generation.
-            lora_request: LoRA request to use for generation, if any.
             priority: The priority of the requests, if any.
             use_tqdm: If True, shows a tqdm progress bar while adding requests.
             tokenization_kwargs: Overrides for `tokenizer.encode`.
@@ -516,7 +509,6 @@ class LLM(OfflineInferenceMixin):
             prompts=prompts,
             params=sampling_params,
             use_tqdm=use_tqdm,
-            lora_request=lora_request,
             priority=priority,
             tokenization_kwargs=tokenization_kwargs,
             mm_processor_kwargs=mm_processor_kwargs,
@@ -612,7 +604,6 @@ class LLM(OfflineInferenceMixin):
         | Sequence[list[ChatCompletionMessageParam]],
         sampling_params: SamplingParams | Sequence[SamplingParams] | None = None,
         use_tqdm: bool | Callable[..., tqdm] = True,
-        lora_request: Sequence[LoRARequest] | LoRARequest | None = None,
         chat_template: str | None = None,
         chat_template_content_format: ChatTemplateContentFormatOption = "auto",
         add_generation_prompt: bool = True,
@@ -647,7 +638,6 @@ class LLM(OfflineInferenceMixin):
                 If a callable (e.g., `functools.partial(tqdm, leave=False)`),
                 it is used to create the progress bar.
                 If `False`, no progress bar is created.
-            lora_request: LoRA request to use for generation, if any.
             chat_template: The template to use for structuring the chat.
                 If not provided, the model's default chat template will be used.
             chat_template_content_format: The format to render message content.
@@ -689,7 +679,6 @@ class LLM(OfflineInferenceMixin):
             params=sampling_params,
             output_type=RequestOutput,
             use_tqdm=use_tqdm,
-            lora_request=lora_request,
             chat_template=chat_template,
             chat_template_content_format=chat_template_content_format,
             chat_template_kwargs=chat_template_kwargs,
@@ -706,7 +695,6 @@ class LLM(OfflineInferenceMixin):
         | Sequence[list[ChatCompletionMessageParam]],
         sampling_params: SamplingParams | Sequence[SamplingParams] | None = None,
         use_tqdm: bool | Callable[..., tqdm] = True,
-        lora_request: Sequence[LoRARequest] | LoRARequest | None = None,
         priority: list[int] | None = None,
         chat_template: str | None = None,
         chat_template_content_format: ChatTemplateContentFormatOption = "auto",
@@ -732,7 +720,6 @@ class LLM(OfflineInferenceMixin):
                 If None, we use the default sampling parameters.
             use_tqdm: If `True`, shows a tqdm progress bar while rendering
                 conversations.
-            lora_request: LoRA request to use for generation, if any.
             priority: The priority of the requests, if any.
             chat_template: The template to use for structuring the chat.
             chat_template_content_format: The format to render message content.
@@ -765,7 +752,6 @@ class LLM(OfflineInferenceMixin):
             messages=messages,
             params=sampling_params,
             use_tqdm=use_tqdm,
-            lora_request=lora_request,
             priority=priority,
             chat_template=chat_template,
             chat_template_content_format=chat_template_content_format,

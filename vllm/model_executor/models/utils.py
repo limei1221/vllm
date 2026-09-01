@@ -23,7 +23,6 @@ from vllm.model_executor.model_loader.reload import (
 )
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.models.interfaces import supports_any_eagle
-from vllm.multimodal import NestedTensors
 from vllm.sequence import IntermediateTensors
 from vllm.utils.math_utils import cdiv
 from vllm.utils.torch_utils import (
@@ -36,6 +35,11 @@ if TYPE_CHECKING:
 
     from vllm.config.model import ModelConfig
     from vllm.model_executor.layers.quantization import QuantizationConfig
+
+NestedTensors: TypeAlias = (
+    list["NestedTensors"] | list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, ...]
+)
+"""Recursive tensor container used by model output plumbing."""
 
 logger = init_logger(__name__)
 

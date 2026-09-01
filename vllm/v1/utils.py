@@ -723,7 +723,7 @@ def report_usage_stats(
             "quantization": model_config.quantization,
             "kv_cache_dtype": str(vllm_config.cache_config.cache_dtype),
             # Feature flags
-            "enable_lora": bool(vllm_config.lora_config),
+            "enable_lora": False,
             "enable_prefix_caching": vllm_config.cache_config.enable_prefix_caching,
             "enforce_eager": model_config.enforce_eager,
             "disable_custom_all_reduce": parallel_config.disable_custom_all_reduce,

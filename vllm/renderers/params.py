@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar
 from vllm.exceptions import VLLMValidationError
 from vllm.inputs import EmbedsPrompt, TextPrompt, TokensPrompt
 from vllm.logger import init_logger
-from vllm.multimodal.media.connector import merge_media_io_kwargs
 from vllm.tokenizers import TokenizerLike
 from vllm.utils.import_utils import LazyLoader
 
@@ -20,6 +19,25 @@ else:
     ChatTemplateContentFormatOption = object
 
 logger = init_logger(__name__)
+
+
+def merge_media_io_kwargs(
+    defaults: "dict[str, dict[str, Any]] | None",
+    overrides: "dict[str, dict[str, Any]] | None",
+) -> "dict[str, dict[str, Any]] | None":
+    """Merge config-level and per-request ``media_io_kwargs`` per modality.
+
+    This build serves text only, so there is no modality-specific merge logic.
+    """
+    if not defaults and not overrides:
+        return None
+    merged: dict[str, dict[str, Any]] = {}
+    for key in set(defaults or {}) | set(overrides or {}):
+        merged[key] = {
+            **(defaults or {}).get(key, {}),
+            **(overrides or {}).get(key, {}),
+        }
+    return merged or None
 
 
 _S = TypeVar("_S", list[int], "torch.Tensor")

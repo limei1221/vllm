@@ -7,7 +7,6 @@ from typing import Any, ParamSpec, TypeVar
 from torch import fx as fx
 
 from vllm import envs
-from vllm._aiter_ops import rocm_aiter_ops
 from vllm.compilation.passes.utility.post_cleanup import PostCleanupPass
 from vllm.config import VllmConfig, set_current_vllm_config
 from vllm.logger import init_logger
@@ -17,17 +16,6 @@ from vllm.utils.system_utils import set_env_var
 from .ir.clone_elimination import UnsafeCloneEliminationPass
 from .ir.lowering_pass import VllmIRLoweringPass
 from .vllm_inductor_pass import VllmInductorPass, VllmPatternMatcherPass
-
-if rocm_aiter_ops.is_enabled() or rocm_aiter_ops.is_rdna_aiter_enabled():
-    from .fusion.allreduce_rms_fusion import (
-        RocmAiterAllReduceFusionPass,
-    )
-    from .fusion.rocm_aiter_fusion import (
-        MLADualRMSNormFusionPass,
-        RocmAiterRMSNormQuantFusionPass,
-        RocmAiterSiluMulFp8GroupQuantFusionPass,
-        RocmAiterTritonAddRMSNormPadFusionPass,
-    )
 
 if current_platform.is_cuda_alike() or current_platform.is_xpu():
     from .fusion.add_rms_fusion import (
@@ -166,18 +154,8 @@ class PostGradPassManager(CustomGraphPass):  # type: ignore[misc]
             if enable_transformers_norm_canonicalization:
                 self.passes += [AddRMSNormFusionPass(config)]
 
-            if self.pass_config.fuse_act_padding and (
-                rocm_aiter_ops.is_enabled() or rocm_aiter_ops.is_rdna_aiter_enabled()
-            ):
-                # Run the more specific RMSNorm+router-pad fusion before
-                # AR+RMS, since both consume fused_add_rms_norm.
-                self.passes += [RocmAiterTritonAddRMSNormPadFusionPass(config)]
-
             if self.pass_config.fuse_allreduce_rms:
-                if rocm_aiter_ops.is_enabled():
-                    self.passes += [RocmAiterAllReduceFusionPass(config)]
-                else:
-                    self.passes += [AllReduceFusionPass(config)]
+                self.passes += [AllReduceFusionPass(config)]
 
             if enable_transformers_norm_canonicalization:
                 # Let AR+RMS match before moving output reshapes ahead of the
@@ -185,30 +163,15 @@ class PostGradPassManager(CustomGraphPass):  # type: ignore[misc]
                 self.passes += [RMSNormReshapeFusionPass(config)]
 
             if self.pass_config.fuse_norm_quant:
-                if (
-                    rocm_aiter_ops.is_enabled()
-                    or rocm_aiter_ops.is_rdna_aiter_enabled()
-                ):
-                    self.passes += [
-                        RocmAiterRMSNormQuantFusionPass(config),
-                    ]
                 self.passes += [RMSNormQuantFusionPass(config)]
 
             if self.pass_config.fuse_act_quant:
                 self.passes += [ActivationQuantFusionPass(config)]
-                if (
-                    rocm_aiter_ops.is_enabled()
-                    or rocm_aiter_ops.is_rdna_aiter_enabled()
-                ):
-                    self.passes += [RocmAiterSiluMulFp8GroupQuantFusionPass(config)]
 
             if self.pass_config.fuse_qk_norm_rope_kvcache:
                 self.passes += [SplitCoalescingPass(config)]
                 self.passes += [ScatterSplitReplacementPass(config)]
                 self.passes += [QkNormRopeKvCacheFusionPass(config)]
-
-            if self.pass_config.fuse_mla_dual_rms_norm and rocm_aiter_ops.is_enabled():
-                self.passes += [MLADualRMSNormFusionPass(config)]
 
             if self.pass_config.fuse_rope_kvcache:
                 self.passes += [SplitCoalescingPass(config)]

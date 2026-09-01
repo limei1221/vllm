@@ -10,7 +10,10 @@ from typing_extensions import NotRequired, TypedDict
 if TYPE_CHECKING:
     import torch
 
-    from vllm.multimodal.inputs import AudioItem, ImageItem, VideoItem, VisionChunk
+    AudioItem: TypeAlias = Any
+    ImageItem: TypeAlias = Any
+    VideoItem: TypeAlias = Any
+    VisionChunk: TypeAlias = Any
 
 
 _T = TypeVar("_T")

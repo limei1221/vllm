@@ -3,14 +3,12 @@
 
 from .interfaces import (
     HasInnerState,
-    SupportsLoRA,
     SupportsMRoPE,
     SupportsMultiModal,
     SupportsMultiModalEmbeddings,
     SupportsPP,
     SupportsTranscription,
     has_inner_state,
-    supports_lora,
     supports_mrope,
     supports_multimodal,
     supports_multimodal_embeddings,
@@ -33,8 +31,6 @@ __all__ = [
     "is_text_generation_model",
     "HasInnerState",
     "has_inner_state",
-    "SupportsLoRA",
-    "supports_lora",
     "SupportsMultiModal",
     "supports_multimodal",
     "SupportsMultiModalEmbeddings",

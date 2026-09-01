@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from openai_harmony import HarmonyError, Message, Role
 from xgrammar import StructuralTag
-from xgrammar.openai_tool_call_schema import BuiltinToolParam, FunctionToolParam
 from xgrammar.structural_tag import (
     AnyTextFormat,
     ConstStringFormat,
@@ -44,14 +43,7 @@ from vllm.entrypoints.openai.parser.harmony_utils import (
 from vllm.entrypoints.openai.responses.protocol import ResponsesRequest
 from vllm.logger import init_logger
 from vllm.parser.abstract_parser import DelegatingParser
-from vllm.reasoning.gptoss_reasoning_parser import GptOssReasoningParser
 from vllm.sampling_params import StructuredOutputsParams
-from vllm.tool_parsers.gptoss_tool_parser import GptOssToolParser
-from vllm.tool_parsers.structural_tag_registry import (
-    SimplifiedToolChoice,
-    get_function_parameters,
-    register_vllm_structural_tag,
-)
 
 if TYPE_CHECKING:
     from openai_harmony import Message, StreamableParser
@@ -95,20 +87,6 @@ class ChunkResult:
 class HarmonyParser(DelegatingParser):
     def __init__(self, tokenizer, tools=None, *args, **kwargs):
         super().__init__(tokenizer, tools, *args, **kwargs)
-
-        if self.reasoning_parser and not isinstance(
-            self.reasoning_parser, GptOssReasoningParser
-        ):
-            raise ValueError(
-                "Harmony requires GptOssReasoningParser, "
-                f"got {self.reasoning_parser.__class__.__name__}."
-            )
-
-        if self.tool_parser and not isinstance(self.tool_parser, GptOssToolParser):
-            raise ValueError(
-                "Harmony requires GptOssToolParser, "
-                f"got {self.tool_parser.__class__.__name__}."
-            )
 
         self._parser: StreamableParser | None = None
         self._next_tool_call_index = 0
@@ -444,68 +422,6 @@ def _assemble_tag(
     tags.append(content)
 
     return StructuralTag(format=SequenceFormat(elements=tags))
-
-
-@register_vllm_structural_tag("harmony")
-def get_harmony_structural_tag(
-    tools: list[FunctionToolParam],
-    builtin_tools: list[BuiltinToolParam],
-    tool_choice: SimplifiedToolChoice,
-    reasoning: bool,
-) -> StructuralTag:
-    # reasoning always enabled for Harmony
-    del reasoning
-
-    if builtin_tools:
-        # Fallback for built-in tools
-        tags = [
-            TagFormat(
-                begin="to=",
-                content=AnyTextFormat(excludes=["<|start|>"]),
-                end=_END_TAG,
-            )
-        ]
-        tags.extend(
-            TagFormat(
-                begin=channel + " to=",
-                content=AnyTextFormat(excludes=["<|start|>", "<|channel|>"]),
-                end=_END_TAG,
-            )
-            for channel in _TOOL_CALL_CHANNELS
-        )
-    else:
-        tags = [
-            TagFormat(
-                begin=pattern.format(name=tool.function.name, channel=channel),
-                content=JSONSchemaFormat(
-                    json_schema=get_function_parameters(tool.function)
-                ),
-                end=_END_TAG,
-            )
-            for tool in tools
-            for pattern in _FUNCTION_CALL_BEGINS
-            for channel in _TOOL_CALL_CHANNELS
-        ]
-
-    if tool_choice == "auto":
-        tags.append(
-            TagFormat(
-                begin=_FINAL_BEGIN.format(constrain=" <|constrain|>json"),
-                content=_ANY_CONTENT,
-                end=_END_TAG,
-            )
-        )
-        tags.append(
-            TagFormat(
-                begin=_FINAL_BEGIN.format(constrain=""),
-                content=_ANY_CONTENT,
-                end=_END_TAG,
-            )
-        )
-
-    return _assemble_tag(
-        allow_analysis=True, allow_commentary=True, content=OrFormat(elements=tags)
-    )
 
 
 def _params_to_final_content(params: StructuredOutputsParams) -> Format | None:

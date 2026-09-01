@@ -16,7 +16,6 @@ from vllm.distributed.kv_transfer.kv_connector.v1.metrics import (
     KVConnectorProm,
 )
 from vllm.logger import init_logger
-from vllm.plugins import STAT_LOGGER_PLUGINS_GROUP, load_plugins_by_group
 from vllm.v1.engine import FinishReason
 from vllm.v1.metrics.perf import PerfMetricsLogging, PerfMetricsProm
 from vllm.v1.metrics.prometheus import unregister_vllm_metrics
@@ -72,20 +71,7 @@ class StatLoggerBase(ABC):
 
 
 def load_stat_logger_plugin_factories() -> list[StatLoggerFactory]:
-    factories: list[StatLoggerFactory] = []
-
-    for name, plugin_class in load_plugins_by_group(STAT_LOGGER_PLUGINS_GROUP).items():
-        if not isinstance(plugin_class, type) or not issubclass(
-            plugin_class, StatLoggerBase
-        ):
-            raise TypeError(
-                f"Stat logger plugin {name!r} must be a subclass of "
-                f"StatLoggerBase (got {plugin_class!r})."
-            )
-
-        factories.append(plugin_class)
-
-    return factories
+    return []
 
 
 class AggregateStatLoggerBase(StatLoggerBase):
@@ -1046,32 +1032,6 @@ class PrometheusStatLogger(AggregateStatLoggerBase):
             self.histogram_kv_block_reuse_gap = {}
 
         #
-        # LoRA metrics
-        #
-
-        # TODO: This metric might be incorrect in case of using multiple
-        # api_server counts which uses prometheus mp.
-        self.gauge_lora_info: Gauge | None = None
-        if vllm_config.lora_config is not None:
-            if len(self.engine_indexes) > 1:
-                logger.warning(
-                    "vllm:lora_requests_info prometheus metrics may be "
-                    "incorrect/misleading with data parallel deployments."
-                )
-            self.labelname_max_lora = "max_lora"
-            self.labelname_waiting_lora_adapters = "waiting_lora_adapters"
-            self.labelname_running_lora_adapters = "running_lora_adapters"
-            self.max_lora = vllm_config.lora_config.max_loras
-            self.gauge_lora_info = self._gauge_cls(
-                name="vllm:lora_requests_info",
-                documentation="Running stats on lora requests.",
-                multiprocess_mode="sum",
-                labelnames=[
-                    self.labelname_max_lora,
-                    self.labelname_waiting_lora_adapters,
-                    self.labelname_running_lora_adapters,
-                ],
-            )
 
     def log_metrics_info(self, type: str, config_obj: SupportsMetricsInfo):
         metrics_info = config_obj.metrics_info()
@@ -1163,20 +1123,6 @@ class PrometheusStatLogger(AggregateStatLoggerBase):
                     idle_hist.observe(event.idle_seconds)
                     for gap in event.reuse_gaps_seconds:
                         reuse_hist.observe(gap)
-
-            if self.gauge_lora_info is not None:
-                running_lora_adapters = ",".join(
-                    scheduler_stats.running_lora_adapters.keys()
-                )
-                waiting_lora_adapters = ",".join(
-                    scheduler_stats.waiting_lora_adapters.keys()
-                )
-                lora_info_labels = {
-                    self.labelname_running_lora_adapters: running_lora_adapters,
-                    self.labelname_waiting_lora_adapters: waiting_lora_adapters,
-                    self.labelname_max_lora: self.max_lora,
-                }
-                self.gauge_lora_info.labels(**lora_info_labels).set_to_current_time()
 
         if mm_cache_stats is not None:
             self.counter_mm_cache_queries[engine_idx].inc(mm_cache_stats.queries)

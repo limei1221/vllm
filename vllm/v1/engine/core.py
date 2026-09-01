@@ -30,9 +30,6 @@ from vllm.distributed import (
 from vllm.envs import enable_envs_cache
 from vllm.logger import init_logger
 from vllm.logging_utils.dump_input import dump_engine_exception
-from vllm.lora.request import LoRARequest
-from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.multimodal.cache import MultiModalCacheMissError
 from vllm.tasks import POOLING_TASKS, SupportedTask
 from vllm.tracing import instrument, maybe_init_worker_tracer
 from vllm.transformers_utils.config import maybe_register_config_serialize_by_value
@@ -89,7 +86,6 @@ from vllm.v1.metrics.stats import SchedulerIterationDetails, SchedulerStats
 from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.request import Request, RequestStatus
 from vllm.v1.serial_utils import MsgpackDecoder, MsgpackEncoder, bytestr
-from vllm.v1.structured_output import StructuredOutputManager
 from vllm.v1.utils import compute_iteration_details
 from vllm.version import __version__ as VLLM_VERSION
 
@@ -112,11 +108,6 @@ class EngineCore:
         executor_fail_callback: Callable | None = None,
         include_finished_set: bool = False,
     ):
-        # plugins need to be loaded at the engine/scheduler level too
-        from vllm.plugins import load_general_plugins
-
-        load_general_plugins()
-
         self.vllm_config = vllm_config
         if not vllm_config.parallel_config.data_parallel_rank_local:
             logger.info(
@@ -142,7 +133,6 @@ class EngineCore:
 
         # Setup KV Caches and update CacheConfig after profiling.
         kv_cache_config = self._initialize_kv_caches(vllm_config)
-        self.structured_output_manager = StructuredOutputManager(vllm_config)
 
         # Setup scheduler.
         Scheduler = vllm_config.scheduler_config.get_scheduler_cls()
@@ -161,7 +151,6 @@ class EngineCore:
         self.scheduler: SchedulerInterface = Scheduler(
             vllm_config=vllm_config,
             kv_cache_config=kv_cache_config,
-            structured_output_manager=self.structured_output_manager,
             include_finished_set=include_finished_set,
             log_stats=self.log_stats,
             block_size=scheduler_block_size,
@@ -175,11 +164,6 @@ class EngineCore:
             self.model_executor.init_kv_output_aggregator(self.scheduler.connector)  # type: ignore
         if self.scheduler.ec_connector is not None:  # type: ignore
             self.model_executor.init_ec_output_aggregator()
-
-        mm_registry = MULTIMODAL_REGISTRY
-        self.mm_receiver_cache = mm_registry.engine_receiver_cache_from_config(
-            vllm_config
-        )
 
         # If a KV connector is initialized for scheduler, we want to collect
         # handshake metadata from all workers so the connector in the scheduler
@@ -749,7 +733,6 @@ class EngineCore:
 
     def shutdown(self):
         logger.debug_once("[shutdown] EngineCore: tearing down local resources")
-        self.structured_output_manager.clear_backend()
         if self.model_executor:
             self.model_executor.shutdown()
         if self.scheduler:
@@ -776,10 +759,6 @@ class EngineCore:
                 "Resetting the multi-modal cache when requests are "
                 "in progress may lead to desynced internal caches."
             )
-
-        # The cache either exists in EngineCore or WorkerWrapperBase
-        if self.mm_receiver_cache is not None:
-            self.mm_receiver_cache.clear_cache()
 
         self.model_executor.reset_mm_cache()
 
@@ -927,18 +906,6 @@ class EngineCore:
     def execute_dummy_batch(self):
         self.model_executor.execute_dummy_batch()
 
-    def add_lora(self, lora_request: LoRARequest) -> bool:
-        return self.model_executor.add_lora(lora_request)
-
-    def remove_lora(self, lora_id: int) -> bool:
-        return self.model_executor.remove_lora(lora_id)
-
-    def list_loras(self) -> set[int]:
-        return self.model_executor.list_loras()
-
-    def pin_lora(self, lora_id: int) -> bool:
-        return self.model_executor.pin_lora(lora_id)
-
     def save_sharded_state(
         self,
         path: str,
@@ -971,22 +938,7 @@ class EngineCore:
         This function could be directly used in input processing thread to allow
         request initialization running in parallel with Model forward
         """
-        # Note on thread safety: no race condition.
-        # `mm_receiver_cache` is reset at the end of LLMEngine init,
-        # and will only be accessed in the input processing thread afterwards.
-        if self.mm_receiver_cache is not None and request.mm_features:
-            request.mm_features = self.mm_receiver_cache.get_and_update_features(
-                request.mm_features
-            )
-
         req = Request.from_engine_core_request(request, self.request_block_hasher)
-        if req.use_structured_output:
-            # Note on thread safety: no race condition.
-            # `grammar_init` is only invoked in input processing thread. For
-            # `structured_output_manager`, each request is independent and
-            # grammar compilation is async. Scheduler always checks grammar
-            # compilation status before scheduling request.
-            self.structured_output_manager.grammar_init(req)
         return req, request.current_wave
 
     def _eep_scale_up_before_kv_init(self):
@@ -1722,11 +1674,6 @@ class EngineCoreProc(EngineCore):
                         req: EngineCoreRequest = add_request_decoder.decode(data_frames)
                         try:
                             request = self.preprocess_add_request(req)
-                        except MultiModalCacheMissError as e:
-                            # P0/P1 shadow drift -- return a retryable signal (P0
-                            # drops the stale entry, client resends with data).
-                            self._handle_mm_cache_miss(req, e)
-                            continue
                         except Exception:
                             self._handle_request_preproc_error(req)
                             continue
@@ -1819,40 +1766,6 @@ class EngineCoreProc(EngineCore):
                 elif len(reuse_buffers) < max_reuse_bufs:
                     # Limit the number of buffers to reuse.
                     reuse_buffers.append(buffer)
-
-    def _handle_mm_cache_miss(
-        self, request: EngineCoreRequest, err: MultiModalCacheMissError
-    ) -> None:
-        """Return a retryable response for a P0/P1 cache-drift miss.
-
-        Surfaces every drifted hash via ``EngineCoreOutput.mm_cache_miss_hashes`` so
-        the frontend drops them from its sender cache and the client resends with
-        data (see ``MultiModalCacheMissError``). Logged at warning, not exception,
-        because it is expected and self-healing.
-        """
-        logger.warning(
-            "Multi-modal cache miss for request %s (mm_hashes=%s): P0/P1 cache "
-            "drift; returning a retryable response so the items are resent with data.",
-            request.request_id,
-            err.mm_hashes,
-        )
-        self.output_queue.put_nowait(
-            (
-                request.client_index,
-                EngineCoreOutputs(
-                    engine_index=self.engine_index,
-                    finished_requests={request.request_id},
-                    outputs=[
-                        EngineCoreOutput(
-                            request_id=request.request_id,
-                            new_token_ids=[],
-                            finish_reason=FinishReason.ERROR,
-                            mm_cache_miss_hashes=err.mm_hashes,
-                        )
-                    ],
-                ),
-            )
-        )
 
     @staticmethod
     def _send_msg_tracking_payload(

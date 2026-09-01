@@ -251,26 +251,12 @@ def validate_structural_tag_response_format(
 
 
 def validate_structural_tag_payload(payload: Any, *, parameter: str) -> None:
-    from vllm.sampling_params import SamplingParams, StructuredOutputsParams
-    from vllm.v1.structured_output.backend_xgrammar import validate_xgrammar_grammar
-
-    if isinstance(payload, str) and not payload:
-        raise VLLMValidationError(
-            f"Invalid {parameter} structural_tag specification.",
-            parameter=parameter,
-        )
-
-    try:
-        validate_xgrammar_grammar(
-            SamplingParams(
-                structured_outputs=StructuredOutputsParams(structural_tag=payload)
-            )
-        )
-    except (TypeError, ValueError, VLLMValidationError) as exc:
-        raise VLLMValidationError(
-            f"Invalid {parameter} structural_tag specification.",
-            parameter=parameter,
-        ) from exc
+    """Reject structural tags; this build has no grammar backend."""
+    del payload
+    raise VLLMValidationError(
+        f"Structural tags are not supported by this build ({parameter}).",
+        parameter=parameter,
+    )
 
 
 def validate_structured_outputs_structural_tag(

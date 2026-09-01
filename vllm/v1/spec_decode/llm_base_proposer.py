@@ -30,7 +30,6 @@ from vllm.model_executor.models import (
 )
 from vllm.model_executor.models.deepseek_eagle3 import Eagle3DeepseekV2ForCausalLM
 from vllm.model_executor.models.interfaces import SupportsMultiModal
-from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.utils.torch_utils import PIN_MEMORY, async_tensor_h2d
 from vllm.v1.attention.backend import CommonAttentionMetadata
 from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
@@ -138,11 +137,7 @@ class SpecDecodeBaseProposer:
         self.max_query_tokens = self.max_num_tokens
         self.max_positions = self.max_num_tokens
 
-        # Multi-modal data support
-        self.mm_registry = MULTIMODAL_REGISTRY
-        self.supports_mm_inputs = self.mm_registry.supports_multimodal_inputs(
-            vllm_config.model_config
-        )
+        self.supports_mm_inputs = False
 
         self.draft_attn_groups: list[AttentionGroup] = []
         self.kv_cache_gid: int = -1

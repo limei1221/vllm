@@ -363,9 +363,9 @@ class BlockPool:
             parent_block_hash=parent_block_hash,
             token_ids=request.all_token_ids[start_token_idx:end_token_idx],
             block_size=block_size,
-            lora_id=request.lora_request.adapter_id if request.lora_request else None,
+            lora_id=None,
             medium=MEDIUM_GPU,
-            lora_name=request.lora_request.name if request.lora_request else None,
+            lora_name=None,
             extra_keys=extra_keys_list if extra_keys_list else None,
             group_idx=kv_cache_group_id,
         )
@@ -530,13 +530,9 @@ class BlockPool:
                     parent_block_hash=parent_block_hash,
                     token_ids=request.all_token_ids[block_start:block_end],
                     block_size=block_end - block_start,
-                    lora_id=request.lora_request.adapter_id
-                    if request.lora_request
-                    else None,
+                    lora_id=None,
                     medium=MEDIUM_GPU,
-                    lora_name=request.lora_request.name
-                    if request.lora_request
-                    else None,
+                    lora_name=None,
                     extra_keys=[extra_keys],
                     group_idx=kv_cache_group_id,
                 )

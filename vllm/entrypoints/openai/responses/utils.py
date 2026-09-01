@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any
 
 from openai.types.chat import (
@@ -13,6 +14,8 @@ from openai.types.chat.chat_completion_message_tool_call_param import (
     Function as FunctionCallTool,
 )
 from openai.types.responses import (
+    FunctionTool,
+    NamespaceTool,
     ResponseFunctionToolCall,
     ResponseOutputItem,
     ResponseOutputMessage,
@@ -38,15 +41,75 @@ from vllm.entrypoints.openai.chat_completion.protocol import (
 from vllm.entrypoints.openai.engine.protocol import FunctionCall, FunctionDefinition
 from vllm.entrypoints.openai.responses.protocol import ResponseInputOutputItem
 from vllm.logger import init_logger
-from vllm.tool_parsers.utils import (
-    build_responses_tool_call_name_map,
-    flat_namespace_tool_name,
-    iter_response_function_tool_dicts,
-    resolve_responses_tool_call_name,
-)
 from vllm.utils import random_uuid
 
 logger = init_logger(__name__)
+
+
+_NAMESPACE_TOOL_SEPARATOR = "__"
+
+
+@dataclass(frozen=True)
+class ResponsesToolCallName:
+    name: str
+    namespace: str | None = None
+
+
+def flat_namespace_tool_name(namespace: str, name: str) -> str:
+    return f"{namespace}{_NAMESPACE_TOOL_SEPARATOR}{name}"
+
+
+def iter_response_function_tool_dicts(
+    tools: list[Tool],
+) -> list[dict[str, Any]]:
+    function_tools: list[dict[str, Any]] = []
+    for tool in tools:
+        if isinstance(tool, NamespaceTool):
+            namespace = tool.name
+            for namespaced_tool in tool.tools:
+                if namespaced_tool.type != "function":
+                    continue
+                tool_dict = namespaced_tool.model_dump()
+                tool_dict["name"] = flat_namespace_tool_name(
+                    namespace, namespaced_tool.name
+                )
+                function_tools.append(tool_dict)
+        elif isinstance(tool, FunctionTool):
+            function_tools.append(tool.model_dump())
+    return function_tools
+
+
+def build_responses_tool_call_name_map(
+    tools: list[Tool] | None,
+) -> dict[str, ResponsesToolCallName]:
+    if not tools:
+        return {}
+
+    name_map: dict[str, ResponsesToolCallName] = {}
+    for tool in tools:
+        if not isinstance(tool, NamespaceTool):
+            continue
+        namespace = tool.name
+        for namespaced_tool in tool.tools:
+            if namespaced_tool.type != "function":
+                continue
+            flat_name = flat_namespace_tool_name(namespace, namespaced_tool.name)
+            name_map[flat_name] = ResponsesToolCallName(
+                name=namespaced_tool.name,
+                namespace=namespace,
+            )
+    return name_map
+
+
+def resolve_responses_tool_call_name(
+    name: str,
+    tools: list[Tool] | None = None,
+    tool_call_name_map: dict[str, ResponsesToolCallName] | None = None,
+) -> ResponsesToolCallName:
+    name_map = tool_call_name_map
+    if name_map is None:
+        name_map = build_responses_tool_call_name_map(tools)
+    return name_map.get(name, ResponsesToolCallName(name=name))
 
 
 def build_response_output_items(

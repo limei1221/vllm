@@ -12,7 +12,6 @@ from typing_extensions import TypeVar
 
 from vllm.logger import init_logger
 from vllm.logprobs import PromptLogprobs, SampleLogprobs
-from vllm.lora.request import LoRARequest
 from vllm.v1.metrics.stats import RequestStateStats
 
 logger = init_logger(__name__)
@@ -47,7 +46,6 @@ class CompletionOutput:
         stop_reason: The stop string or token id that caused the completion
             to stop, None if the completion finished for some other reason
             including encountering the EOS token.
-        lora_request: The LoRA request that was used to generate the output.
     """
 
     index: int
@@ -58,7 +56,6 @@ class CompletionOutput:
     routed_experts: np.ndarray | None = None  # [seq_len,layer_num,topk]
     finish_reason: str | None = None
     stop_reason: int | str | None = None
-    lora_request: LoRARequest | None = None
     sampling_mask: SamplingMask | None = None
 
     def finished(self) -> bool:
@@ -112,7 +109,6 @@ class RequestOutput:
         outputs: The output sequences of the request.
         finished: Whether the whole request is finished.
         metrics: Metrics associated with the request.
-        lora_request: The LoRA request that was used to generate the output.
         encoder_prompt: The encoder prompt string of the request.
                         None if decoder-only.
         encoder_prompt_token_ids: The token IDs of the encoder prompt.
@@ -133,7 +129,6 @@ class RequestOutput:
         outputs: list[CompletionOutput],
         finished: bool,
         metrics: RequestStateStats | None = None,
-        lora_request: LoRARequest | None = None,
         encoder_prompt: str | None = None,
         encoder_prompt_token_ids: list[int] | None = None,
         num_cached_tokens: int | None = None,
@@ -156,7 +151,6 @@ class RequestOutput:
         self.outputs = outputs
         self.finished = finished
         self.metrics = metrics
-        self.lora_request = lora_request
         self.encoder_prompt = encoder_prompt
         self.encoder_prompt_token_ids = encoder_prompt_token_ids
         self.num_cached_tokens = num_cached_tokens
@@ -206,7 +200,6 @@ class RequestOutput:
             f"outputs={self.outputs}, "
             f"finished={self.finished}, "
             f"metrics={self.metrics}, "
-            f"lora_request={self.lora_request}, "
             f"num_cached_tokens={self.num_cached_tokens}, "
             f"num_cache_creation_tokens={self.num_cache_creation_tokens})"
         )

@@ -560,10 +560,6 @@ class CudaPlatformBase(Platform):
         return AttentionBackendEnum.TORCH_SDPA
 
     @classmethod
-    def get_punica_wrapper(cls) -> str:
-        return "vllm.lora.punica_wrapper.punica_gpu.PunicaWrapperGPU"
-
-    @classmethod
     def get_device_communicator_cls(cls) -> str:
         return (
             "vllm.distributed.device_communicators.cuda_communicator.CudaCommunicator"  # noqa

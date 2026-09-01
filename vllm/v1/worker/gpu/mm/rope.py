@@ -64,8 +64,9 @@ class RopeState:
         req_idx: int,
         model: nn.Module,
         prefill_token_ids: list[int],
-        mm_features: list,
+        mm_features: list | None = None,
     ) -> None:
+        mm_features = mm_features or []
         if self.has_delta:
             mrope_model = cast(SupportsMRoPE, model)
             prefill_positions, delta = mrope_model.get_mrope_input_positions(

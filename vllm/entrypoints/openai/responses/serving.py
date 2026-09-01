@@ -96,7 +96,6 @@ from vllm.inputs import EngineInput, tokens_input
 from vllm.logger import init_logger
 from vllm.logprobs import Logprob as SampleLogprob
 from vllm.logprobs import SampleLogprobs
-from vllm.lora.request import LoRARequest
 from vllm.outputs import CompletionOutput
 from vllm.parser import Parser, ParserManager
 from vllm.renderers.online_renderer import OnlineRenderer
@@ -378,8 +377,7 @@ class OpenAIServingResponses(GenerateBaseServing):
         else:
             prev_response = None
 
-        lora_request = self._maybe_get_adapters(request)
-        model_name = self.models.model_name(lora_request)
+        model_name = self.models.model_name()
 
         if self.use_harmony:
             messages, engine_inputs = self._make_request_with_harmony(
@@ -515,7 +513,6 @@ class OpenAIServingResponses(GenerateBaseServing):
                 engine_input=engine_input,
                 sampling_params=sampling_params,
                 context=context,
-                lora_request=lora_request,
                 priority=self._get_priority(request, raw_request),
                 trace_headers=trace_headers,
                 session_id=session_id,
@@ -667,7 +664,6 @@ class OpenAIServingResponses(GenerateBaseServing):
         engine_input: EngineInput,
         sampling_params: SamplingParams,
         context: ConversationContext,
-        lora_request: LoRARequest | None = None,
         priority: int = 0,
         trace_headers: Mapping[str, str] | None = None,
         session_id: str | None = None,
@@ -685,14 +681,12 @@ class OpenAIServingResponses(GenerateBaseServing):
                 sub_request_id,
                 engine_input,
                 params=sampling_params,
-                lora_request=lora_request,
             )
 
             generator = self.engine_client.generate(
                 engine_input,
                 sampling_params,
                 sub_request_id,
-                lora_request=lora_request,
                 trace_headers=trace_headers,
                 priority=priority,
                 session_id=session_id,

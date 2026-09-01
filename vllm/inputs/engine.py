@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Literal, TypeAlias
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 
 from typing_extensions import NotRequired, TypedDict, assert_never
 
@@ -12,7 +12,8 @@ from vllm.exceptions import VLLMValidationError
 if TYPE_CHECKING:
     import torch
 
-    from vllm.multimodal.inputs import MultiModalKwargsOptionalItems, PlaceholderRange
+    MultiModalKwargsOptionalItems: TypeAlias = Any
+    PlaceholderRange: TypeAlias = Any
 
 
 class _InputOptions(TypedDict):

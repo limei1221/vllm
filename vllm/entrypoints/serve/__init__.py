@@ -21,12 +21,6 @@ def register_vllm_serve_api_routers(app: FastAPI):
 
     register_instrumentator_api_routers(app)
 
-    from vllm.entrypoints.serve.lora.api_router import (
-        attach_router as attach_lora_router,
-    )
-
-    attach_lora_router(app)
-
     from vllm.entrypoints.serve.profile.api_router import (
         attach_router as attach_profile_router,
     )

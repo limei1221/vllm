@@ -346,17 +346,14 @@ class ObjectSerde(ABC):
 class MsgpackSerde(ObjectSerde):
     def __init__(self):
         # Delayed import to avoid circular dependency
-        from vllm.multimodal.inputs import MultiModalKwargsItem
         from vllm.v1.serial_utils import MsgpackDecoder, MsgpackEncoder
 
         self.encoder = MsgpackEncoder()
         self.tensor_decoder = MsgpackDecoder(torch.Tensor, share_mem=False)
-        self.mm_decoder = MsgpackDecoder(MultiModalKwargsItem, share_mem=False)
-        self._mm_kwargs_item_cls = MultiModalKwargsItem
 
     def serialize(self, value: Any) -> tuple[bytes | list[bytes], int, bytes, int]:
         len_arr = None
-        if isinstance(value, (torch.Tensor, self._mm_kwargs_item_cls)):
+        if isinstance(value, torch.Tensor):
             type_name = type(value).__name__
             value = self.encoder.encode(value)
             len_arr = [len(s) for s in value]
@@ -386,14 +383,6 @@ class MsgpackSerde(ObjectSerde):
                 obj.append(item_bytes)
                 start_idx += length
             obj = self.tensor_decoder.decode(obj)
-        elif type_name == self._mm_kwargs_item_cls.__name__:
-            obj = []
-            start_idx = 0
-            for length in len_arr:
-                item_bytes = serialized_data[start_idx : start_idx + length]
-                obj.append(item_bytes)
-                start_idx += length
-            obj = self.mm_decoder.decode(obj)
         elif type_name == bytes.__name__:
             obj = pickle.loads(serialized_data)
         else:

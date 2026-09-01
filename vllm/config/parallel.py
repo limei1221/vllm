@@ -858,7 +858,8 @@ class ParallelConfig:
             raise ValueError("This focused build does not support EPLB.")
         if self.data_parallel_external_lb or self.data_parallel_hybrid_lb:
             raise ValueError(
-                "This focused build does not support external or hybrid DP load balancing."
+                "This focused build does not support external or hybrid DP "
+                "load balancing."
             )
         if self.all2all_backend not in ("allgather_reducescatter",):
             raise ValueError(
@@ -950,10 +951,7 @@ class ParallelConfig:
             # We use multiprocessing by default if world_size fits on the
             # current node and we aren't in a ray placement group.
 
-            from vllm.v1.executor import ray_utils
-
             backend: DistributedExecutorBackend = "mp"
-            ray_found = ray_utils.ray_is_available()
             if current_platform.is_tpu() and envs.VLLM_XLA_USE_SPMD:
                 backend = "uni"
             elif current_platform.is_cuda() and self.nnodes > 1:
@@ -970,23 +968,6 @@ class ParallelConfig:
                     "- ray, set '--distributed-executor-backend ray'.\n"
                     "- multiprocessing, set '--nnodes' appropriately."
                 )
-            elif self.data_parallel_backend == "ray":
-                logger.info(
-                    "Using ray distributed inference because "
-                    "data_parallel_backend is ray"
-                )
-                backend = "ray"
-            elif ray_found:
-                if self.placement_group:
-                    backend = "ray"
-                else:
-                    from ray import is_initialized as ray_is_initialized
-
-                    if ray_is_initialized():
-                        from ray.util import get_current_placement_group
-
-                        if get_current_placement_group():
-                            backend = "ray"
             self.distributed_executor_backend = backend
             logger.debug("Defaulting to use %s for distributed inference", backend)
 
@@ -1055,11 +1036,6 @@ class ParallelConfig:
                 "values are 'ray', 'mp' 'uni', 'external_launcher', "
                 " custom Executor subclass or its import path."
             )
-        if self.use_ray:
-            from vllm.v1.executor import ray_utils
-
-            ray_utils.assert_ray_available()
-
         if not current_platform.use_custom_allreduce():
             self.disable_custom_all_reduce = True
             logger.debug(

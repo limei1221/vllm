@@ -142,8 +142,7 @@ class OpenAIServingChatBatch(OpenAIServingChat):
         if raw_request:
             raw_request.state.request_metadata = request_metadata
 
-        lora_request = self._maybe_get_adapters(request, supports_default_mm_loras=True)
-        model_name = self.models.model_name(lora_request)
+        model_name = self.models.model_name()
         data_parallel_rank = self._get_data_parallel_rank(raw_request)
         max_model_len = self.model_config.max_model_len
 
@@ -167,7 +166,6 @@ class OpenAIServingChatBatch(OpenAIServingChat):
                 sub_request_id,
                 engine_prompt,
                 params=sampling_params,
-                lora_request=lora_request,
             )
             trace_headers = (
                 None
@@ -180,7 +178,6 @@ class OpenAIServingChatBatch(OpenAIServingChat):
                     engine_prompt,
                     sampling_params,
                     sub_request_id,
-                    lora_request=lora_request,
                     trace_headers=trace_headers,
                     priority=request.priority,
                     data_parallel_rank=data_parallel_rank,

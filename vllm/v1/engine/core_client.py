@@ -25,7 +25,6 @@ from vllm import envs
 from vllm.config import VllmConfig
 from vllm.envs import VLLM_ENGINE_READY_TIMEOUT_S
 from vllm.logger import init_logger
-from vllm.lora.request import LoRARequest
 from vllm.tasks import SupportedTask
 from vllm.tracing import instrument
 from vllm.utils.async_utils import in_loop
@@ -63,7 +62,6 @@ from vllm.v1.fault_tolerance.utils import (
     FaultToleranceRequest,
     FaultToleranceResult,
 )
-from vllm.v1.pool.late_interaction import get_late_interaction_engine_index
 from vllm.v1.serial_utils import MsgpackDecoder, MsgpackEncoder, bytestr
 
 logger = init_logger(__name__)
@@ -194,18 +192,6 @@ class EngineCoreClient(ABC):
     def abort_requests(self, request_ids: list[str]) -> None:
         raise NotImplementedError
 
-    def add_lora(self, lora_request: LoRARequest) -> bool:
-        raise NotImplementedError
-
-    def remove_lora(self, lora_id: int) -> bool:
-        raise NotImplementedError
-
-    def list_loras(self) -> set[int]:
-        raise NotImplementedError
-
-    def pin_lora(self, lora_id: int) -> bool:
-        raise NotImplementedError
-
     def save_sharded_state(
         self, path: str, pattern: str | None = None, max_size: int | None = None
     ) -> None:
@@ -266,18 +252,6 @@ class EngineCoreClient(ABC):
         raise NotImplementedError
 
     async def abort_requests_async(self, request_ids: list[str]) -> None:
-        raise NotImplementedError
-
-    async def add_lora_async(self, lora_request: LoRARequest) -> bool:
-        raise NotImplementedError
-
-    async def remove_lora_async(self, lora_id: int) -> bool:
-        raise NotImplementedError
-
-    async def list_loras_async(self) -> set[int]:
-        raise NotImplementedError
-
-    async def pin_lora_async(self, lora_id: int) -> bool:
         raise NotImplementedError
 
     async def save_sharded_state_async(
@@ -371,18 +345,6 @@ class InprocClient(EngineCoreClient):
 
     def get_weight_version(self) -> str:
         return self.engine_core.get_weight_version()
-
-    def add_lora(self, lora_request: LoRARequest) -> bool:
-        return self.engine_core.add_lora(lora_request)
-
-    def remove_lora(self, lora_id: int) -> bool:
-        return self.engine_core.remove_lora(lora_id)
-
-    def list_loras(self) -> set[int]:
-        return self.engine_core.list_loras()
-
-    def pin_lora(self, lora_id: int) -> bool:
-        return self.engine_core.pin_lora(lora_id)
 
     def save_sharded_state(
         self, path: str, pattern: str | None = None, max_size: int | None = None
@@ -929,18 +891,6 @@ class SyncMPClient(MPClient):
     def reset_encoder_cache(self) -> None:
         self.call_utility("reset_encoder_cache")
 
-    def add_lora(self, lora_request: LoRARequest) -> bool:
-        return self.call_utility("add_lora", lora_request)
-
-    def remove_lora(self, lora_id: int) -> bool:
-        return self.call_utility("remove_lora", lora_id)
-
-    def list_loras(self) -> set[int]:
-        return self.call_utility("list_loras")
-
-    def pin_lora(self, lora_id: int) -> bool:
-        return self.call_utility("pin_lora", lora_id)
-
     def sleep(self, level: int = 1, mode: PauseMode = "abort") -> None:
         self.call_utility("sleep", level, mode)
 
@@ -1201,18 +1151,6 @@ class AsyncMPClient(MPClient):
     async def get_weight_version_async(self) -> str:
         return await self.call_utility_async("get_weight_version")
 
-    async def add_lora_async(self, lora_request: LoRARequest) -> bool:
-        return await self.call_utility_async("add_lora", lora_request)
-
-    async def remove_lora_async(self, lora_id: int) -> bool:
-        return await self.call_utility_async("remove_lora", lora_id)
-
-    async def list_loras_async(self) -> set[int]:
-        return await self.call_utility_async("list_loras")
-
-    async def pin_lora_async(self, lora_id: int) -> bool:
-        return await self.call_utility_async("pin_lora", lora_id)
-
     async def save_sharded_state_async(
         self, path: str, pattern: str | None = None, max_size: int | None = None
     ) -> None:
@@ -1470,11 +1408,7 @@ class DPLBAsyncMPClient(DPAsyncMPClient):
 
     def get_core_engine_for_request(self, request: EngineCoreRequest) -> EngineIdentity:
         # Engines are in rank order.
-        if (eng_index := request.data_parallel_rank) is None and (
-            eng_index := get_late_interaction_engine_index(
-                request.pooling_params, len(self.core_engines)
-            )
-        ) is None:
+        if (eng_index := request.data_parallel_rank) is None:
             current_counts = self.lb_engines
             # TODO use P2C alg for larger DP sizes
             num_engines = len(current_counts)
