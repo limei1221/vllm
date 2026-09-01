@@ -103,10 +103,7 @@ class Scheduler(SchedulerInterface):
             self.kv_events_config is not None
             and self.kv_events_config.enable_kv_cache_events
         )
-        # Diffusion models may not sample any tokens for a denoising step.
-        self.num_sampled_tokens_per_step = (
-            1 if not vllm_config.model_config.is_diffusion else 0
-        )
+        self.num_sampled_tokens_per_step = 1
 
         # Create KVConnector for the Scheduler. Note that each Worker
         # will have a corresponding KVConnector with Role=WORKER.
@@ -793,7 +790,6 @@ class Scheduler(SchedulerInterface):
 
                     # Pad new decode requests to uniform spec decoding size to
                     # preserve full cudagraph for this step.
-                    # Not for diffusion where draft tokens can't be padded.
                     if (
                         (self.num_spec_tokens > 0 and self.dynamic_sd_lookup is None)
                         and self.num_sampled_tokens_per_step > 0

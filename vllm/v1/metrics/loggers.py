@@ -96,9 +96,7 @@ class LoggingStatLogger(StatLoggerBase):
         self.connector_prefix_caching_metrics = CachingMetrics()
         self.mm_caching_metrics = CachingMetrics()
 
-        model_config = self.vllm_config.model_config
-        is_diffusion = model_config is not None and model_config.is_diffusion
-        self.spec_decoding_logging = SpecDecodingLogging(is_diffusion=is_diffusion)
+        self.spec_decoding_logging = SpecDecodingLogging(is_diffusion=False)
         kv_transfer_config = self.vllm_config.kv_transfer_config
         self.kv_connector_logging = KVConnectorLogging(kv_transfer_config)
         self.cudagraph_logging = None
@@ -464,7 +462,7 @@ class PrometheusStatLogger(AggregateStatLoggerBase):
             vllm_config.speculative_config,
             labelnames,
             per_engine_labelvalues,
-            is_diffusion=vllm_config.model_config.is_diffusion,
+            is_diffusion=False,
         )
         self.kv_connector_prom = self._kv_connector_cls(
             vllm_config, labelnames, per_engine_labelvalues

@@ -31,7 +31,6 @@ from .attention import AttentionConfig
 from .cache import CacheConfig
 from .compilation import CompilationConfig, CompilationMode, CUDAGraphMode
 from .device import DeviceConfig
-from .diffusion import DiffusionConfig
 from .ec_manager_config import EncoderCacheManagerConfig
 from .ec_transfer import ECTransferConfig
 from .kernel import KernelConfig
@@ -352,8 +351,6 @@ class VllmConfig:
     """Speculative decoding configuration."""
     structured_outputs_config: StructuredOutputsConfig | None = None
     """Structured outputs configuration. Unsupported in this build; always None."""
-    diffusion_config: DiffusionConfig | None = None
-    """Diffusion configuration. Unsupported in this build; always None."""
     observability_config: ObservabilityConfig = Field(
         default_factory=ObservabilityConfig
     )
@@ -435,12 +432,6 @@ class VllmConfig:
         vllm_factors.append(__version__)
         if self.model_config:
             vllm_factors.append(self.model_config.compute_hash())
-            if (
-                self.compilation_config
-                and getattr(self.compilation_config, "compile_mm_encoder", False)
-                and self.model_config.multimodal_config
-            ):
-                vllm_factors.append(self.model_config.multimodal_config.compute_hash())
         else:
             vllm_factors.append("None")
         if self.cache_config:
@@ -527,12 +518,7 @@ class VllmConfig:
 
     @property
     def is_encoder_only(self) -> bool:
-        mm_config = (
-            self.model_config.multimodal_config
-            if self.model_config is not None
-            else None
-        )
-        return self.is_ec_producer_only or bool(mm_config and mm_config.mm_encoder_only)
+        return self.is_ec_producer_only
 
     @property
     def max_concurrent_batches(self) -> int:
@@ -623,9 +609,6 @@ class VllmConfig:
         # the same checkpoint drafts through DFlashProposer, which never calls
         # it, so the draft degrades to DFlash1 silently. Force V2 as for dspark.
         if self._is_dflash2_draft():
-            return True
-
-        if self.model_config is not None and self.model_config.is_diffusion:
             return True
 
         if not self._is_default_v2_model_runner_model():
@@ -835,12 +818,6 @@ class VllmConfig:
         # Therefore, the presence of tie_word_embeddings in SomeVLTextConfig cannot
         # be used as a signal for whether tie_word_embeddings should be copied from
         # hf_config to the language_model config.
-        if model_config.is_multimodal_model and hasattr(
-            model_config.hf_config, "tie_word_embeddings"
-        ):
-            tie_word_embeddings = model_config.hf_config.tie_word_embeddings
-            hf_config.get_text_config().tie_word_embeddings = tie_word_embeddings
-
         model_config.hf_config = hf_config
         model_config.model_arch_config = model_config.get_model_arch_config()
 
@@ -1016,10 +993,6 @@ class VllmConfig:
         if self.speculative_config is not None:
             raise ValueError(
                 "sampling distribution replay does not support speculative decoding"
-            )
-        if model_config.is_diffusion:
-            raise ValueError(
-                "sampling distribution replay does not support diffusion models"
             )
         if model_config.logits_processors:
             raise ValueError(
@@ -1237,17 +1210,6 @@ class VllmConfig:
                 "async speculative decoding).",
             )
             self.model_config.disable_cascade_attn = True
-
-        if (
-            self.model_config is not None
-            and self.model_config.multimodal_config is not None
-            and self.model_config.multimodal_config.mm_tensor_ipc == "torch_shm"
-            and os.environ.get("VLLM_WORKER_MULTIPROC_METHOD") != "spawn"
-        ):
-            raise ValueError(
-                "torch_shm is known to fail without "
-                "VLLM_WORKER_MULTIPROC_METHOD set to spawn"
-            )
 
         if (
             self.model_config is not None
@@ -1573,10 +1535,6 @@ class VllmConfig:
                 "to True to enable."
             )
         current_platform.check_and_update_config(self)
-
-        self._resolve_allow_missing_mm_embeddings()
-        self._resolve_mm_processor_device()
-        self._validate_mm_processor_device()
 
         if self.use_v2_model_runner:
             self._validate_v2_model_runner()
@@ -2156,7 +2114,6 @@ class VllmConfig:
         from vllm.model_executor.models import ModelRegistry
         from vllm.model_executor.models.config import (
             MODELS_CONFIG_MAP,
-            HybridAttentionMambaModelConfig,
         )
 
         cls = MODELS_CONFIG_MAP.get(architecture, None)
@@ -2170,9 +2127,6 @@ class VllmConfig:
             cls = MODELS_CONFIG_MAP.get(architecture, None)
         if cls is not None:
             cls.verify_and_update_config(self)
-
-        if self.model_config.is_hybrid:
-            HybridAttentionMambaModelConfig.verify_and_update_config(self)
 
         if self.model_config.convert_type == "classify":
             # Maybe convert ForCausalLM into ForSequenceClassification model.
@@ -2249,101 +2203,6 @@ class VllmConfig:
             f"compilation_config={self.compilation_config!r}, "
             f"kernel_config={self.kernel_config!r}"
         )
-
-    def _resolve_allow_missing_mm_embeddings(self) -> None:
-        """Allow `*_embeds` tensors to be omitted on disaggregated consumers.
-
-        An EC consumer loads embeddings from its connector. A KV consumer
-        receives the prompt KV produced from those embeddings, so it does not
-        need the tensors either. On every other deployment a missing tensor is
-        a client error and must keep failing fast in the frontend.
-        """
-        model_config = self.model_config
-        if model_config is None:
-            return
-        mm_config = model_config.multimodal_config
-        if mm_config is None:
-            return
-
-        ec_config = self.ec_transfer_config
-        kv_config = self.kv_transfer_config
-        # Derived, so overwrite unconditionally rather than honouring a value
-        # that was set by hand.
-        mm_config.allow_missing_mm_embeddings = (
-            ec_config is not None and ec_config.is_ec_consumer
-        ) or (kv_config is not None and kv_config.is_kv_consumer)
-        if mm_config.allow_missing_mm_embeddings:
-            logger.info_once(
-                "EC/KV consumer: pre-computed-embedding inputs may "
-                "omit the embedding tensor."
-            )
-
-    def _resolve_mm_processor_device(self) -> None:
-        """Settle `--mm-processor-device=auto` now that the EC role is known.
-
-        "auto" means "the accelerator, but only where the processor has it to
-        itself and its output can be handed over without a copy back to host":
-        an encode-only instance whose tensor transport carries device tensors.
-        Every other deployment keeps the processor on CPU.
-
-        An explicit device -- from `--mm-processor-device` or straight from
-        `mm_processor_kwargs` -- is already folded in by `MultiModalConfig`, so
-        it is left alone here and validated by `_validate_mm_processor_device`.
-        """
-        model_config = self.model_config
-        if model_config is None:
-            return
-        mm_config = model_config.multimodal_config
-        if mm_config is None:
-            return
-        if mm_config.get_mm_processor_device_type() is not None:
-            return
-
-        from vllm.platforms import current_platform
-
-        device_type = current_platform.device_type
-        if device_type in ("", "cpu"):
-            return
-
-        ec_config = self.ec_transfer_config
-        # An EC producer that is not also a consumer runs no forward pass and
-        # allocates no KV cache, so frontend accelerator work has the device to
-        # itself.
-        if ec_config is None or not ec_config.is_encode_only:
-            return
-
-        if mm_config.mm_tensor_ipc != "torch_shm":
-            # Any other transport serializes host bytes, so the output would be
-            # copied back, and that copy costs more than running the transform
-            # on device saves.
-            logger.info_once(
-                "EPD encoder instance: keeping the multi-modal processor on CPU "
-                "because mm_tensor_ipc=%s cannot carry device tensors. Add "
-                "--mm-tensor-ipc=torch_shm to run it on the accelerator.",
-                mm_config.mm_tensor_ipc,
-            )
-            return
-
-        mm_config.mm_processor_kwargs = {
-            **(mm_config.mm_processor_kwargs or {}),
-            "device": device_type,
-        }
-        logger.info_once(
-            "EPD encoder instance: running the multi-modal processor on %s. "
-            "Override with --mm-processor-device=cpu.",
-            device_type,
-        )
-
-    def _validate_mm_processor_device(self) -> None:
-        """Hand the EC config to `MultiModalConfig`, which owns the rule."""
-        model_config = self.model_config
-        if model_config is None:
-            return
-        mm_config = model_config.multimodal_config
-        if mm_config is None:
-            return
-
-        mm_config.validate_mm_processor_device(self.ec_transfer_config)
 
     def _get_v2_model_runner_unsupported_features(self) -> list[str]:
         """Collect features not yet supported by the V2 model runner."""

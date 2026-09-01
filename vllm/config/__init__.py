@@ -10,7 +10,6 @@ from vllm.config.compilation import (
     PassConfig,
 )
 from vllm.config.device import DeviceConfig
-from vllm.config.diffusion import DiffusionConfig
 from vllm.config.ec_manager_config import EncoderCacheManagerConfig
 from vllm.config.ec_transfer import ECTransferConfig
 from vllm.config.fault_tolerance import FaultToleranceConfig
@@ -25,7 +24,6 @@ from vllm.config.model import (
     str_dtype_to_torch_dtype,
     try_match_architecture_defaults,
 )
-from vllm.config.multimodal import MultiModalConfig
 from vllm.config.observability import ObservabilityConfig
 from vllm.config.offload import (
     OffloadBackend,
@@ -39,7 +37,6 @@ from vllm.config.profiler import ProfilerConfig
 from vllm.config.reasoning import ReasoningConfig
 from vllm.config.scheduler import SchedulerConfig
 from vllm.config.speculative import SpeculativeConfig
-from vllm.config.speech_to_text import SpeechToTextConfig, SpeechToTextParams
 from vllm.config.structured_outputs import StructuredOutputsConfig
 from vllm.config.utils import (
     ConfigType,
@@ -74,8 +71,6 @@ __all__ = [
     "PassConfig",
     # From vllm.config.device
     "DeviceConfig",
-    # From vllm.config.diffusion
-    "DiffusionConfig",
     # From vllm.config.ec_manager_config
     "EncoderCacheManagerConfig",
     # From vllm.config.ec_transfer
@@ -95,8 +90,6 @@ __all__ = [
     "iter_architecture_defaults",
     "str_dtype_to_torch_dtype",
     "try_match_architecture_defaults",
-    # From vllm.config.multimodal
-    "MultiModalConfig",
     # From vllm.config.observability
     "ObservabilityConfig",
     # From vllm.config.offload
@@ -115,9 +108,6 @@ __all__ = [
     "SchedulerConfig",
     # From vllm.config.speculative
     "SpeculativeConfig",
-    # From vllm.config.speech_to_text
-    "SpeechToTextConfig",
-    "SpeechToTextParams",
     # From vllm.config.structured_outputs
     "StructuredOutputsConfig",
     # From vllm.config.profiler

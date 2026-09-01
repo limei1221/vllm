@@ -37,11 +37,8 @@ from vllm.utils.func_utils import supports_kw
 if TYPE_CHECKING:
     from vllm.config import (
         ModelConfig,
-        SpeechToTextConfig,
-        SpeechToTextParams,
         VllmConfig,
     )
-    from vllm.config.multimodal import VideoPruningMethod
     from vllm.inputs import PromptType, TokensPrompt
     from vllm.model_executor.layers.fused_moe import MoERunner
     from vllm.model_executor.layers.mamba.mamba_utils import MambaStateCopyFunc
@@ -286,7 +283,7 @@ class SupportsMultiModal(SupportsMultiModalEmbeddings, Protocol):
                     lambda mod: StageMissingLayer("language_model", mod),
                     targets=targets,
                 )
-                if mm_config.mm_encoder_only
+                if mm_config is not None and mm_config.mm_encoder_only
                 else nullcontext()
             ):
                 yield
@@ -330,7 +327,8 @@ class SupportsMultiModal(SupportsMultiModalEmbeddings, Protocol):
                     lambda mod: StageMissingLayer(stage_name, mod),
                     targets=targets,
                 )
-                if all(mm_config.get_limit_per_prompt(m) == 0 for m in modalities)
+                if mm_config is not None
+                and all(mm_config.get_limit_per_prompt(m) == 0 for m in modalities)
                 else nullcontext()
             ):
                 yield
@@ -486,9 +484,7 @@ class SupportsMultiModalPruning(Protocol):
 
     supports_multimodal_pruning: ClassVar[Literal[True]] = True
 
-    supported_video_pruning_methods: ClassVar[tuple["VideoPruningMethod", ...]] = (
-        "evs",
-    )
+    supported_video_pruning_methods: ClassVar[tuple[str, ...]] = ("evs",)
     """Video pruning methods (as reported by
     `MultiModalConfig.get_video_pruning_spec`) implemented by this model.
     Models supporting methods beyond EVS should override this."""
@@ -1196,7 +1192,7 @@ class SupportsTranscription(Protocol):
     @classmethod
     def get_generation_prompt(
         cls,
-        stt_params: "SpeechToTextParams",
+        stt_params: Any,
     ) -> "PromptType":
         """Get the prompt for the ASR model.
         The model has control over the construction, as long as it
@@ -1236,7 +1232,7 @@ class SupportsTranscription(Protocol):
     @classmethod
     def get_speech_to_text_config(
         cls, model_config: "ModelConfig", task_type: Literal["transcribe", "translate"]
-    ) -> "SpeechToTextConfig":
+    ) -> Any:
         """Get the speech to text config for the ASR model."""
         ...
 
@@ -1244,7 +1240,7 @@ class SupportsTranscription(Protocol):
     def get_num_audio_tokens(
         cls,
         audio_duration_s: float,
-        stt_config: "SpeechToTextConfig",
+        stt_config: Any,
         model_config: "ModelConfig",
     ) -> int | None:
         """
@@ -1296,7 +1292,7 @@ class SupportsTranscription(Protocol):
     def get_language_detection_prompt(
         cls,
         audio: np.ndarray,
-        stt_config: "SpeechToTextConfig",
+        stt_config: Any,
     ) -> "PromptType":
         """Return a prompt that triggers language detection.
 

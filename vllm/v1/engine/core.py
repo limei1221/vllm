@@ -157,9 +157,7 @@ class EngineCore:
             hash_block_size=hash_block_size,
         )
         self.use_spec_decode = vllm_config.speculative_config is not None
-        self.check_for_draft_tokens = (
-            self.use_spec_decode or vllm_config.model_config.is_diffusion
-        )
+        self.check_for_draft_tokens = self.use_spec_decode
         if self.scheduler.connector is not None:  # type: ignore
             self.model_executor.init_kv_output_aggregator(self.scheduler.connector)  # type: ignore
         if self.scheduler.ec_connector is not None:  # type: ignore

@@ -38,7 +38,6 @@ from vllm.config import (
     CompilationConfig,
     ConfigType,
     DeviceConfig,
-    DiffusionConfig,
     ECTransferConfig,
     EncoderCacheManagerConfig,
     EPLBConfig,
@@ -49,7 +48,6 @@ from vllm.config import (
     LoadConfig,
     MambaConfig,
     ModelConfig,
-    MultiModalConfig,
     ObservabilityConfig,
     OffloadConfig,
     ParallelConfig,
@@ -83,13 +81,6 @@ from vllm.config.model import (
     ModelDType,
     RunnerOption,
     TokenizerMode,
-)
-from vllm.config.multimodal import (
-    MMCacheType,
-    MMEncoderTPMode,
-    MMHasherAlgorithm,
-    MMProcessorDevice,
-    MMTensorIPC,
 )
 from vllm.config.observability import DetailedTraceModules
 from vllm.config.parallel import (
@@ -556,48 +547,8 @@ class EngineArgs:
     allow_deprecated_quantization: bool = ModelConfig.allow_deprecated_quantization
     enforce_eager: bool = ModelConfig.enforce_eager
     disable_custom_all_reduce: bool = ParallelConfig.disable_custom_all_reduce
-    language_model_only: bool = MultiModalConfig.language_model_only
-    limit_mm_per_prompt: dict[str, int | dict[str, int]] = get_field(
-        MultiModalConfig, "limit_per_prompt"
-    )
-    enable_mm_embeds: bool = MultiModalConfig.enable_mm_embeds
-    interleave_mm_strings: bool = MultiModalConfig.interleave_mm_strings
-    media_io_kwargs: dict[str, dict[str, Any]] = get_field(
-        MultiModalConfig, "media_io_kwargs"
-    )
-    mm_processor_kwargs: dict[str, Any] | None = MultiModalConfig.mm_processor_kwargs
-    mm_processor_cache_gb: float = MultiModalConfig.mm_processor_cache_gb
-    mm_processor_cache_type: MMCacheType | None = (
-        MultiModalConfig.mm_processor_cache_type
-    )
-    mm_hasher_algorithm: MMHasherAlgorithm = get_field(
-        MultiModalConfig, "mm_hasher_algorithm"
-    )
-    mm_shm_cache_max_object_size_mb: int = (
-        MultiModalConfig.mm_shm_cache_max_object_size_mb
-    )
-    mm_encoder_only: bool = MultiModalConfig.mm_encoder_only
-    mm_encoder_tp_mode: MMEncoderTPMode = MultiModalConfig.mm_encoder_tp_mode
-    mm_encoder_attn_backend: AttentionBackendEnum | str | None = (
-        MultiModalConfig.mm_encoder_attn_backend
-    )
-    mm_encoder_attn_dtype: str | None = MultiModalConfig.mm_encoder_attn_dtype
-    mm_encoder_fp8_scale_path: str | None = MultiModalConfig.mm_encoder_fp8_scale_path
-    mm_encoder_fp8_scale_save_path: str | None = (
-        MultiModalConfig.mm_encoder_fp8_scale_save_path
-    )
-    mm_encoder_fp8_scale_save_margin: float = (
-        MultiModalConfig.mm_encoder_fp8_scale_save_margin
-    )
-    io_processor_plugin: str | None = None
-    renderer_num_workers: int = 1
-    skip_mm_profiling: bool = MultiModalConfig.skip_mm_profiling
-    video_pruning_rate: float | None = MultiModalConfig.video_pruning_rate
-    video_pruning_method: str = MultiModalConfig.video_pruning_method
-    mm_tensor_ipc: MMTensorIPC = MultiModalConfig.mm_tensor_ipc
-    mm_processor_device: MMProcessorDevice = "auto"
-    mm_ipc_gpu_memory_gb: float = MultiModalConfig.mm_ipc_gpu_memory_gb
-    mm_device_do_normalize: bool | None = MultiModalConfig.mm_device_do_normalize
+    io_processor_plugin: str | None = ModelConfig.io_processor_plugin
+    renderer_num_workers: int = ModelConfig.renderer_num_workers
 
     ray_workers_use_nsight: bool = ParallelConfig.ray_workers_use_nsight
     num_gpu_blocks_override: int | None = CacheConfig.num_gpu_blocks_override
@@ -626,7 +577,6 @@ class EngineArgs:
     spec_method: str | None = None
     spec_model: str | None = None
     spec_tokens: int | None = None
-    diffusion_config: dict[str, Any] | None = None
 
     show_hidden_metrics_for_version: str | None = (
         ObservabilityConfig.show_hidden_metrics_for_version
@@ -1268,119 +1218,6 @@ class EngineArgs:
             "--offload-params", **prefetch_kwargs["offload_params"]
         )
 
-        # Multimodal related configs
-        multimodal_kwargs = get_kwargs(MultiModalConfig)
-        multimodal_group = parser.add_argument_group(
-            title="MultiModalConfig",
-            description=MultiModalConfig.__doc__,
-        )
-        multimodal_group.add_argument(
-            "--language-model-only", **multimodal_kwargs["language_model_only"]
-        )
-        multimodal_group.add_argument(
-            "--limit-mm-per-prompt", **multimodal_kwargs["limit_per_prompt"]
-        )
-        multimodal_group.add_argument(
-            "--enable-mm-embeds", **multimodal_kwargs["enable_mm_embeds"]
-        )
-        multimodal_group.add_argument(
-            "--media-io-kwargs", **multimodal_kwargs["media_io_kwargs"]
-        )
-        multimodal_group.add_argument(
-            "--mm-processor-kwargs", **multimodal_kwargs["mm_processor_kwargs"]
-        )
-        multimodal_group.add_argument(
-            "--mm-processor-cache-gb", **multimodal_kwargs["mm_processor_cache_gb"]
-        )
-        multimodal_group.add_argument(
-            "--mm-processor-cache-type", **multimodal_kwargs["mm_processor_cache_type"]
-        )
-        multimodal_group.add_argument(
-            "--mm-hasher-algorithm", **multimodal_kwargs["mm_hasher_algorithm"]
-        )
-        multimodal_group.add_argument(
-            "--mm-shm-cache-max-object-size-mb",
-            **multimodal_kwargs["mm_shm_cache_max_object_size_mb"],
-        )
-        multimodal_group.add_argument(
-            "--mm-encoder-only", **multimodal_kwargs["mm_encoder_only"]
-        )
-        multimodal_group.add_argument(
-            "--mm-encoder-tp-mode", **multimodal_kwargs["mm_encoder_tp_mode"]
-        )
-        multimodal_group.add_argument(
-            "--mm-encoder-attn-backend",
-            **multimodal_kwargs["mm_encoder_attn_backend"],
-        )
-        multimodal_group.add_argument(
-            "--mm-encoder-attn-dtype",
-            **multimodal_kwargs["mm_encoder_attn_dtype"],
-        )
-        multimodal_group.add_argument(
-            "--mm-encoder-fp8-scale-path",
-            **multimodal_kwargs["mm_encoder_fp8_scale_path"],
-        )
-        multimodal_group.add_argument(
-            "--mm-encoder-fp8-scale-save-path",
-            **multimodal_kwargs["mm_encoder_fp8_scale_save_path"],
-        )
-        multimodal_group.add_argument(
-            "--mm-encoder-fp8-scale-save-margin",
-            **multimodal_kwargs["mm_encoder_fp8_scale_save_margin"],
-        )
-        multimodal_group.add_argument(
-            "--interleave-mm-strings", **multimodal_kwargs["interleave_mm_strings"]
-        )
-        multimodal_group.add_argument(
-            "--skip-mm-profiling", **multimodal_kwargs["skip_mm_profiling"]
-        )
-
-        multimodal_group.add_argument(
-            "--video-pruning-rate", **multimodal_kwargs["video_pruning_rate"]
-        )
-        multimodal_group.add_argument(
-            "--video-pruning-method",
-            **multimodal_kwargs["video_pruning_method"],
-        )
-        multimodal_group.add_argument(
-            "--mm-tensor-ipc", **multimodal_kwargs["mm_tensor_ipc"]
-        )
-        multimodal_group.add_argument(
-            "--mm-processor-device",
-            choices=["auto", "cpu"]
-            + (
-                [current_platform.device_type]
-                if current_platform.device_type not in ("", "cpu")
-                else []
-            ),
-            default="auto",
-            help="Device the HF multi-modal processor runs the image/video "
-            "transform on. Convenience for `--mm-processor-kwargs "
-            "'{\"device\": ...}'`: the value is resolved here and stored there, "
-            "it is not kept as separate state. Only takes effect for HF "
-            '"fast" (torchvision-backed) processors, which accept a `device` '
-            "argument; the others ignore it and stay on CPU.\n\n"
-            '"auto" uses the accelerator on encoder instances of an '
-            "encode/prefill/decode deployment -- an EC producer that is not "
-            "also a consumer allocates no KV cache, so its accelerator is not "
-            "contended by the language model -- and then only when "
-            "`--mm-tensor-ipc=torch_shm` can carry device tensors, since every "
-            "other transport would copy the result back to the host and that "
-            'copy costs more than it saves. "auto" resolves to "cpu" '
-            "everywhere else.",
-        )
-        multimodal_group.add_argument(
-            "--mm-ipc-gpu-memory-gb",
-            **multimodal_kwargs["mm_ipc_gpu_memory_gb"],
-        )
-        multimodal_group.add_argument(
-            "--mm-device-do-normalize",
-            **{
-                **multimodal_kwargs["mm_device_do_normalize"],
-                "default": None,
-            },
-        )
-
         # Observability arguments
         observability_kwargs = get_kwargs(ObservabilityConfig)
         observability_group = parser.add_argument_group(
@@ -1561,10 +1398,6 @@ class EngineArgs:
         vllm_group.add_argument(
             "--spec-tokens", **speculative_kwargs["num_speculative_tokens"]
         )
-        vllm_kwargs["diffusion_config"]["type"] = optional_type(json.loads)
-        vllm_group.add_argument(
-            "--diffusion-config", "-dc", **vllm_kwargs["diffusion_config"]
-        )
         vllm_group.add_argument(
             "--kv-transfer-config", **vllm_kwargs["kv_transfer_config"]
         )
@@ -1698,38 +1531,6 @@ class EngineArgs:
             skip_tokenizer_init=self.skip_tokenizer_init,
             enable_prompt_embeds=self.enable_prompt_embeds,
             served_model_name=self.served_model_name,
-            language_model_only=self.language_model_only,
-            limit_mm_per_prompt=self.limit_mm_per_prompt,
-            enable_mm_embeds=self.enable_mm_embeds,
-            interleave_mm_strings=self.interleave_mm_strings,
-            media_io_kwargs=self.media_io_kwargs,
-            skip_mm_profiling=self.skip_mm_profiling,
-            config_format=self.config_format,
-            mm_processor_kwargs=self.mm_processor_kwargs,
-            mm_processor_cache_gb=self.mm_processor_cache_gb,
-            mm_processor_cache_type=self.mm_processor_cache_type,
-            mm_shm_cache_max_object_size_mb=self.mm_shm_cache_max_object_size_mb,
-            mm_hasher_algorithm=self.mm_hasher_algorithm,
-            mm_encoder_only=self.mm_encoder_only,
-            mm_encoder_tp_mode=self.mm_encoder_tp_mode,
-            mm_encoder_attn_backend=self.mm_encoder_attn_backend,
-            mm_encoder_attn_dtype=self.mm_encoder_attn_dtype,
-            mm_encoder_fp8_scale_path=self.mm_encoder_fp8_scale_path,
-            mm_encoder_fp8_scale_save_path=self.mm_encoder_fp8_scale_save_path,
-            mm_encoder_fp8_scale_save_margin=self.mm_encoder_fp8_scale_save_margin,
-            pooler_config=self.pooler_config,
-            generation_config=self.generation_config,
-            override_generation_config=self.override_generation_config,
-            enable_sleep_mode=self.enable_sleep_mode,
-            enable_cumem_allocator=self.enable_cumem_allocator,
-            model_impl=self.model_impl,
-            logits_processors=self.logits_processors,
-            video_pruning_rate=self.video_pruning_rate,
-            video_pruning_method=self.video_pruning_method,
-            mm_tensor_ipc=self.mm_tensor_ipc,
-            mm_ipc_gpu_memory_gb=self.mm_ipc_gpu_memory_gb,
-            mm_device_do_normalize=self.mm_device_do_normalize,
-            mm_processor_device=self.mm_processor_device,
             io_processor_plugin=self.io_processor_plugin,
             renderer_num_workers=self.renderer_num_workers,
         )
@@ -1837,14 +1638,6 @@ class EngineArgs:
                     )
             return [cvd_ids[i] for i in int_ids]
         return int_ids
-
-    def create_diffusion_config(self) -> DiffusionConfig | None:
-        if self.diffusion_config is None:
-            return None
-        cfg = self.diffusion_config
-        if isinstance(cfg, str):
-            cfg = json.loads(cfg)
-        return DiffusionConfig(**cfg)
 
     def create_observability_config(self) -> ObservabilityConfig:
         return ObservabilityConfig(

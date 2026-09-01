@@ -931,26 +931,7 @@ class SamplingParams(
             )
 
     def _validate_diffusion(self, model_config: ModelConfig) -> None:
-        if not model_config.is_diffusion:
-            return
-
-        # Diffusion models denoise a whole canvas per step with a fixed
-        # temperature schedule, so per-request sampling parameters are not
-        # supported. Penalties are ignored by the sampler with a warning.
-        if (
-            self.temperature != 1.0
-            or self.min_p > _SAMPLING_EPS
-            or self.seed is not None
-            or self.min_tokens > 0
-            or self.logit_bias
-            or self.bad_words
-            or self.allowed_token_ids
-        ):
-            raise VLLMValidationError(
-                "The temperature, min_p, seed, min_tokens, logit_bias, "
-                "bad_words, and allowed_token_ids sampling parameters "
-                "are not yet supported with diffusion models."
-            )
+        return
 
     def _validate_structured_outputs(
         self,

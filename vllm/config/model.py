@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 from collections.abc import Callable
-from dataclasses import InitVar, field
+from dataclasses import field
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 
@@ -12,14 +12,6 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 import vllm.envs as envs
 from vllm.config.model_arch import (
     ModelArchitectureConfig,
-)
-from vllm.config.multimodal import (
-    MMCacheType,
-    MMEncoderTPMode,
-    MMHasherAlgorithm,
-    MMProcessorDevice,
-    MMTensorIPC,
-    MultiModalConfig,
 )
 from vllm.config.pooler import POOLER_CONFIG_LOG_FIELDS, PoolerConfig
 from vllm.config.quantization import QuantizationConfigArgs
@@ -31,7 +23,6 @@ from vllm.tasks import PoolingTask, ScoreType, SupportedTask
 from vllm.transformers_utils.config import (
     ConfigFormat,
     get_config,
-    get_hf_image_processor_config,
     get_hf_text_config,
     get_pooling_config,
     get_sentence_transformer_tokenizer_config,
@@ -51,7 +42,6 @@ from vllm.transformers_utils.repo_utils import resolve_revision
 from vllm.transformers_utils.runai_utils import ObjectStorageModel, is_runai_obj_uri
 from vllm.transformers_utils.utils import maybe_model_redirect
 from vllm.utils.import_utils import LazyLoader
-from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
 if TYPE_CHECKING:
     from transformers import PretrainedConfig
@@ -369,34 +359,10 @@ class ModelConfig:
     """Pooler config which controls the behaviour of output pooling in pooling
     models."""
 
-    # Multimodal config and init vars
-    multimodal_config: MultiModalConfig | None = None
-    """Configuration for multimodal model. If `None`, this will be inferred
-    from the architecture of `self.model`."""
-    language_model_only: InitVar[bool] = False
-    limit_mm_per_prompt: InitVar[dict[str, int | dict[str, int]] | None] = None
-    enable_mm_embeds: InitVar[bool | None] = None
-    media_io_kwargs: InitVar[dict[str, dict[str, Any]] | None] = None
-    mm_processor_kwargs: InitVar[dict[str, Any] | None] = None
-    mm_processor_cache_gb: InitVar[float | None] = None
-    mm_processor_cache_type: InitVar[MMCacheType | None] = None
-    mm_hasher_algorithm: InitVar[MMHasherAlgorithm | None] = None
-    mm_shm_cache_max_object_size_mb: InitVar[int | None] = None
-    mm_encoder_only: InitVar[bool | None] = None
-    mm_encoder_tp_mode: InitVar[MMEncoderTPMode | None] = None
-    mm_encoder_attn_backend: InitVar[AttentionBackendEnum | str | None] = None
-    mm_encoder_attn_dtype: InitVar[str | None] = None
-    mm_encoder_fp8_scale_path: InitVar[str | None] = None
-    mm_encoder_fp8_scale_save_path: InitVar[str | None] = None
-    mm_encoder_fp8_scale_save_margin: InitVar[float | None] = None
-    interleave_mm_strings: InitVar[bool | None] = None
-    skip_mm_profiling: InitVar[bool | None] = None
-    video_pruning_rate: InitVar[float | None] = None
-    video_pruning_method: InitVar[str | None] = None
-    mm_tensor_ipc: InitVar[MMTensorIPC] = None
-    mm_ipc_gpu_memory_gb: InitVar[float | None] = None
-    mm_device_do_normalize: InitVar[bool | None] = None
-    mm_processor_device: InitVar[MMProcessorDevice | None] = None
+    # Always None in this build; kept so downstream `is not None` checks
+    # short-circuit without import errors.
+    multimodal_config: Any | None = None
+    """Multimodal config. Unsupported in this build; always None."""
 
     def compute_hash(self) -> str:
         """
@@ -433,28 +399,11 @@ class ModelConfig:
             "logits_processors",
             "io_processor_plugin",
             "pooler_config",
-            "multimodal_config",
-            "limit_mm_per_prompt",
-            "media_io_kwargs",
-            "mm_processor_kwargs",
-            "mm_processor_cache_gb",
-            "mm_processor_cache_type",
-            "mm_shm_cache_max_object_size_mb",
-            "mm_encoder_tp_mode",
-            "interleave_mm_strings",
-            "skip_mm_profiling",
-            "mm_ipc_gpu_memory_gb",
         }
 
         from vllm.config.utils import get_hash_factors, hash_factors
 
         factors = get_hash_factors(self, ignored_factors)
-
-        # NOTE: For some models (e.g, Qwen3-VL), whether the MM code path is enabled
-        # affects the computation graph of the language model, therefore we add it
-        # here early.
-        if self.multimodal_config:
-            factors["language_model_only"] = self.multimodal_config.language_model_only
         return hash_factors(factors)
 
     def _update_nested(
@@ -502,34 +451,7 @@ class ModelConfig:
                 # It's a dict-valued parameter - set it directly
                 setattr(config, key, value)
 
-    def __post_init__(
-        self,
-        # Multimodal config init vars
-        language_model_only: bool,
-        limit_mm_per_prompt: dict[str, int | dict[str, int]] | None,
-        enable_mm_embeds: bool | None,
-        media_io_kwargs: dict[str, dict[str, Any]] | None,
-        mm_processor_kwargs: dict[str, Any] | None,
-        mm_processor_cache_gb: float | None,
-        mm_processor_cache_type: MMCacheType | None,
-        mm_hasher_algorithm: MMHasherAlgorithm | None,
-        mm_shm_cache_max_object_size_mb: int | None,
-        mm_encoder_only: bool | None,
-        mm_encoder_tp_mode: MMEncoderTPMode | None,
-        mm_encoder_attn_backend: AttentionBackendEnum | str | None,
-        mm_encoder_attn_dtype: str | None,
-        mm_encoder_fp8_scale_path: str | None,
-        mm_encoder_fp8_scale_save_path: str | None,
-        mm_encoder_fp8_scale_save_margin: float | None,
-        interleave_mm_strings: bool | None,
-        skip_mm_profiling: bool | None,
-        video_pruning_rate: float | None,
-        video_pruning_method: str | None,
-        mm_tensor_ipc: MMTensorIPC,
-        mm_ipc_gpu_memory_gb: float | None,
-        mm_device_do_normalize: bool | None,
-        mm_processor_device: MMProcessorDevice | None,
-    ) -> None:
+    def __post_init__(self) -> None:
         # Keep set served_model_name before maybe_model_redirect(self.model)
         self.served_model_name = get_served_model_name(
             self.model, self.served_model_name
@@ -745,92 +667,7 @@ class ModelConfig:
         self.max_model_len = self.get_and_verify_max_len(self.max_model_len)
 
         if self.is_encoder_decoder:
-            mm_processor_cache_gb = 0
-            logger.info("Encoder-decoder model detected, disabling mm processor cache.")
-
-        # Init multimodal config if needed
-        if self._model_info.supports_multimodal:
-            self.hf_image_processor_config = get_hf_image_processor_config(
-                self.model, hf_token=self.hf_token, revision=self.revision
-            )
-            if (
-                mm_encoder_tp_mode == "data"
-                and not self._model_info.supports_multimodal_encoder_tp_data
-            ):
-                logger.warning_once(
-                    "This model does not support `--mm-encoder-tp-mode data`. "
-                    "Falling back to `--mm-encoder-tp-mode weights`."
-                )
-                mm_encoder_tp_mode = "weights"
-
-            mm_processor_kwargs = MultiModalConfig.fold_mm_processor_device(
-                mm_processor_kwargs, mm_processor_device
-            )
-
-            mm_config_kwargs = dict(
-                language_model_only=language_model_only,
-                limit_per_prompt=limit_mm_per_prompt,
-                enable_mm_embeds=enable_mm_embeds,
-                media_io_kwargs=media_io_kwargs,
-                mm_processor_kwargs=mm_processor_kwargs,
-                mm_processor_cache_gb=mm_processor_cache_gb,
-                mm_processor_cache_type=mm_processor_cache_type,
-                mm_hasher_algorithm=mm_hasher_algorithm,
-                mm_shm_cache_max_object_size_mb=mm_shm_cache_max_object_size_mb,
-                mm_encoder_only=mm_encoder_only,
-                mm_encoder_tp_mode=mm_encoder_tp_mode,
-                mm_encoder_attn_backend=mm_encoder_attn_backend,
-                mm_encoder_attn_dtype=mm_encoder_attn_dtype,
-                mm_encoder_fp8_scale_path=mm_encoder_fp8_scale_path,
-                mm_encoder_fp8_scale_save_path=mm_encoder_fp8_scale_save_path,
-                mm_encoder_fp8_scale_save_margin=mm_encoder_fp8_scale_save_margin,
-                interleave_mm_strings=interleave_mm_strings,
-                skip_mm_profiling=skip_mm_profiling,
-                video_pruning_rate=video_pruning_rate,
-                video_pruning_method=video_pruning_method,
-                mm_tensor_ipc=mm_tensor_ipc,
-                mm_ipc_gpu_memory_gb=mm_ipc_gpu_memory_gb,
-                mm_device_do_normalize=self._resolve_mm_device_do_normalize(
-                    mm_device_do_normalize
-                ),
-            )
-
-            mm_config_kwargs = {
-                k: v for k, v in mm_config_kwargs.items() if v is not None
-            }
-
-            self.multimodal_config = MultiModalConfig(**mm_config_kwargs)  # type: ignore[arg-type]
-
-            pruning_spec = self.multimodal_config.get_video_pruning_spec()
-            supported_pruning = self._model_info.supported_video_pruning_methods
-            if (
-                pruning_spec is not None
-                and supported_pruning
-                and pruning_spec[0] not in supported_pruning
-            ):
-                raise ValueError(
-                    f"Video pruning method '{pruning_spec[0]}' is not "
-                    f"supported by {self._model_info.architecture} "
-                    f"(supported methods: {supported_pruning})."
-                )
-
-            if (
-                self.renderer_num_workers > 1
-                and self.multimodal_config.mm_processor_cache_gb > 0
-                and self.runner_type == "pooling"
-            ):
-                raise ValueError(
-                    "Cannot use --renderer-num-workers > 1 with the "
-                    "multimodal processor cache enabled for pooling models. "
-                    "Pooling preprocessing runs on the renderer workers, and "
-                    "the cache is not thread-safe. Please set "
-                    "--renderer-num-workers 1 (the default), or "
-                    "disable the cache with --mm-processor-cache-gb 0."
-                )
-
-            # Rebuild after multimodal_config exists so text-only mm_prefix
-            # clearing is applied (and cached for later with_hf_config calls).
-            self.model_arch_config = self.get_model_arch_config()
+            logger.info("Encoder-decoder model detected.")
 
         if self.disable_sliding_window:
             # Set after get_and_verify_max_len to ensure that max_model_len
@@ -843,40 +680,6 @@ class ModelConfig:
         self._verify_quantization()
         self._verify_cuda_graph()
 
-    def _supports_multimodal_for_mm_prefix(self) -> bool:
-        """Whether multimodal inputs can still appear for this deployment.
-
-        This runs more than once per config: once early in ``__post_init__``
-        (before ``multimodal_config`` exists), again after it is created, and
-        then for every ``get_model_arch_config`` regeneration -- notably
-        ``with_hf_config``, which deep-copies this ``ModelConfig`` and swaps
-        ``hf_config`` for a text-only submodule (e.g. ``Gemma4ForCausalLM``).
-
-        The result is cached for correctness, not just to save work: on the
-        ``with_hf_config`` copy the submodule architecture has no registered
-        multimodal processor, so re-querying the registry would raise and be
-        treated as text-only, wrongly clearing ``is_mm_prefix_lm`` even when a
-        vision modality is still enabled (e.g. ``image=0`` but video allowed).
-        The deep-copied cache preserves the top-level decision instead.
-        """
-        cached = getattr(self, "_supports_multimodal_inputs_cached", None)
-        if cached is not None:
-            return cached
-
-        if self.multimodal_config is None:
-            # Early call before multimodal init — do not clear mm_prefix yet.
-            return True
-
-        supports_mm = False
-        self._supports_multimodal_inputs_cached = supports_mm
-        if not supports_mm:
-            logger.info_once(
-                "Disabled mm_prefix attention mode because multimodal inputs "
-                "are configuration-disabled. Attention backends without "
-                "mm_prefix support may now be selected."
-            )
-        return supports_mm
-
     def get_model_arch_config(self) -> ModelArchitectureConfig:
         convertor_cls = MODEL_ARCH_CONFIG_CONVERTORS.get(
             self.hf_config.model_type, ModelArchConfigConvertorBase
@@ -886,9 +689,7 @@ class ModelConfig:
             self.hf_text_config,
             revision=getattr(self, "revision", None),
         )
-        return convertor.convert(
-            supports_multimodal=self._supports_multimodal_for_mm_prefix()
-        )
+        return convertor.convert(supports_multimodal=False)
 
     @field_validator("tokenizer", "max_model_len", mode="wrap")
     @classmethod
@@ -925,51 +726,6 @@ class ModelConfig:
                 "Example: max_model_len=2048"
             )
         return self
-
-    def _resolve_mm_device_do_normalize(
-        self, mm_device_do_normalize: bool | None
-    ) -> bool:
-        if mm_device_do_normalize is None:
-            if envs.VLLM_USE_RUST_FRONTEND:
-                logger.debug(
-                    "VLLM_USE_RUST_FRONTEND is set. "
-                    "Rust frontend does not currently support mm_device_do_normalize, "
-                    "forcing mm_device_do_normalize = False."
-                )
-                mm_device_do_normalize = False
-            else:
-                mm_device_do_normalize = (
-                    self._model_info.supports_mm_device_do_normalize
-                )
-                logger.debug(
-                    "mm_device_do_normalize is %s by default.",
-                    "enabled" if mm_device_do_normalize else "disabled",
-                )
-        else:
-            if mm_device_do_normalize and envs.VLLM_USE_RUST_FRONTEND:
-                logger.warning(
-                    "VLLM_USE_RUST_FRONTEND is set. "
-                    "Rust frontend does not currently support mm_device_do_normalize, "
-                    "forcing mm_device_do_normalize = False."
-                )
-                mm_device_do_normalize = False
-
-            if (
-                mm_device_do_normalize
-                and not self._model_info.supports_mm_device_do_normalize
-            ):
-                logger.warning(
-                    "Model does not support mm_device_do_normalize, "
-                    "forcing mm_device_do_normalize = False."
-                )
-                mm_device_do_normalize = False
-
-            logger.debug(
-                "mm_device_do_normalize is %s.",
-                "enabled" if mm_device_do_normalize else "disabled",
-            )
-
-        return mm_device_do_normalize
 
     def _get_transformers_backend_cls(self) -> str:
         """Determine which Transformers modeling backend class will be used if
@@ -1617,18 +1373,6 @@ class ModelConfig:
 
         return chunk_size
 
-    def get_multimodal_config(self) -> MultiModalConfig:
-        """
-        Get the multimodal configuration of the model.
-
-        Raises:
-            ValueError: If the model is not multimodal.
-        """
-        if self.multimodal_config is None:
-            raise ValueError("The model is not multimodal.")
-
-        return self.multimodal_config
-
     def try_get_generation_config(self) -> dict[str, Any]:
         """
         This method attempts to retrieve the non-default values of the
@@ -1759,11 +1503,6 @@ class ModelConfig:
         """Extract the HF encoder/decoder model flag."""
         return is_encoder_decoder(self.hf_config)
 
-    @cached_property
-    def is_diffusion(self) -> bool:
-        """Detect discrete diffusion (dLLM) models from HF config."""
-        return getattr(self.hf_config, "canvas_length", None) is not None
-
     @property
     def uses_alibi(self) -> bool:
         cfg = self.hf_text_config
@@ -1797,11 +1536,11 @@ class ModelConfig:
 
     @property
     def is_multimodal_model(self) -> bool:
-        return self.multimodal_config is not None
+        return False
 
     @property
     def is_multimodal_raw_input_only_model(self) -> bool:
-        return self._model_info.supports_multimodal_raw_input_only
+        return False
 
     @property
     def requires_raw_input_tokens(self) -> bool:
