@@ -17,7 +17,6 @@ from ..utils import (
     compute_acceptance_len,
     compute_acceptance_rate,
     evaluate_llm_for_gsm8k,
-    get_instruct_coder_messages,
     get_test_prompts,
     greedy_sampling,
     stochastic_sampling,
@@ -48,8 +47,6 @@ class ArgsTest:
 def get_messages(dataset: str, n: int) -> list[Messages]:
     if dataset == "test_prompts":
         return get_test_prompts(mm_enabled=False, num_prompts=n)
-    if dataset == "likaixin/InstructCoder":
-        return get_instruct_coder_messages(n=n)
     raise NotImplementedError(f"Dataset '{dataset}' not implemented")
 
 

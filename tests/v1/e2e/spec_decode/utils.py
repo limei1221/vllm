@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import random
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 import pytest
@@ -85,14 +85,6 @@ def get_test_prompts(mm_enabled: bool, num_prompts: int = 100) -> list[Messages]
     return prompts
 
 
-def get_instruct_coder_messages(n: int) -> list[Messages]:
-    from vllm.benchmarks.datasets import InstructCoderDataset
-
-    dataset = InstructCoderDataset(
-        dataset_path="likaixin/InstructCoder", dataset_split="train"
-    )
-    prompts: Iterable[str] = dataset.sample_prompts(n=n)
-    return [[{"role": "user", "content": prompt}] for prompt in prompts]
 
 
 def greedy_sampling() -> SamplingParams:
