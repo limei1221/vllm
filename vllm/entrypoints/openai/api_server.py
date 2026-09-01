@@ -187,71 +187,40 @@ def build_app(
     model_config: ModelConfig | None = None,
 ) -> FastAPI:
     if supported_tasks is None:
-        warnings.warn(
-            "The 'supported_tasks' parameter was not provided to "
-            "build_app and will be required in a future version. "
-            "Defaulting to ('generate',).",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         supported_tasks = _FALLBACK_SUPPORTED_TASKS
 
-    if args.disable_fastapi_docs:
-        app = FastAPI(
-            openapi_url=None, docs_url=None, redoc_url=None, lifespan=lifespan
-        )
-    elif args.enable_offline_docs:
-        app = FastAPI(docs_url=None, redoc_url=None, lifespan=lifespan)
-    else:
-        app = FastAPI(lifespan=lifespan)
+    app = FastAPI(
+        openapi_url=None, docs_url=None, redoc_url=None, lifespan=lifespan
+    )
     app.state.args = args
 
-    from vllm.entrypoints.serve import register_vllm_serve_api_routers
+    # Health and metrics (instrumentator)
+    from vllm.entrypoints.serve.instrumentator import (
+        register_instrumentator_api_routers,
+    )
 
-    register_vllm_serve_api_routers(app)
+    register_instrumentator_api_routers(app)
 
+    # /v1/models
     from vllm.entrypoints.openai.models.api_router import (
         attach_router as register_models_api_router,
     )
 
     register_models_api_router(app)
 
-    from vllm.entrypoints.serve.sagemaker.api_router import (
-        attach_router as register_sagemaker_api_router,
+    # /v1/chat/completions
+    from vllm.entrypoints.openai.chat_completion.api_router import (
+        attach_router as register_chat_api_router,
     )
 
-    register_sagemaker_api_router(app, supported_tasks, model_config)
+    register_chat_api_router(app)
 
-    if envs.VLLM_SERVER_DEV_MODE:
-        from vllm.entrypoints.serve import register_vllm_dev_api_routers
+    # /v1/completions
+    from vllm.entrypoints.openai.completion.api_router import (
+        attach_router as register_completion_api_router,
+    )
 
-        register_vllm_dev_api_routers(app)
-
-    if "generate" in supported_tasks:
-        from vllm.entrypoints.generate.api_router import (
-            register_generate_api_routers,
-        )
-
-        register_generate_api_routers(app)
-
-        from vllm.entrypoints.serve.elastic_ep.api_router import (
-            attach_router as elastic_ep_attach_router,
-        )
-
-        elastic_ep_attach_router(app)
-
-    if args.enable_fault_tolerance:
-        from vllm.entrypoints.serve.fault_tolerance.api_router import (
-            register_fault_tolerance_api_router,
-        )
-
-        register_fault_tolerance_api_router(app)
-
-    # Endpoint plugins are attached last so their routes are registered after all core
-    # routers. This runs even for the CPU only render server. A plugin eligible for
-    # the `render` task still gets its routes registered. It receives
-    # `engine_client=None` at Phase B (see `_init_endpoint_plugins_state`).
-    _attach_endpoint_plugins(app, supported_tasks)
+    register_completion_api_router(app)
 
     init_exception_handler(app)
 
@@ -264,41 +233,20 @@ def build_app(
         allow_headers=args.allowed_headers,
     )
 
-    # Ensure --api-key option from CLI takes precedence over VLLM_API_KEY
     if tokens := [key for key in (args.api_key or [envs.VLLM_API_KEY]) if key]:
-        from vllm.entrypoints.serve.utils.server_utils import AuthenticationMiddleware
+        from vllm.entrypoints.serve.utils.server_utils import (
+            AuthenticationMiddleware,
+        )
 
         app.add_middleware(AuthenticationMiddleware, tokens=tokens)
 
     if args.enable_request_id_headers:
-        from vllm.entrypoints.serve.utils.server_utils import XRequestIdMiddleware
+        from vllm.entrypoints.serve.utils.server_utils import (
+            XRequestIdMiddleware,
+        )
 
         app.add_middleware(XRequestIdMiddleware)
 
-    # Add scaling middleware to check for scaling state
-    app.add_middleware(ScalingMiddleware)
-
-    if envs.VLLM_DEBUG_LOG_API_SERVER_RESPONSE:
-        logger.warning(
-            "CAUTION: Enabling log response in the API Server. "
-            "This can include sensitive information and should be "
-            "avoided in production."
-        )
-        app.middleware("http")(log_response)
-
-    for middleware in args.middleware:
-        module_path, object_name = middleware.rsplit(".", 1)
-        imported = getattr(importlib.import_module(module_path), object_name)
-        if inspect.isclass(imported):
-            app.add_middleware(imported)  # type: ignore[arg-type]
-        elif inspect.iscoroutinefunction(imported):
-            app.middleware("http")(imported)
-        else:
-            raise ValueError(
-                f"Invalid middleware {middleware}. Must be a function or a class."
-            )
-
-    app = sagemaker_standards_bootstrap(app)
     return app
 
 
