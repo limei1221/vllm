@@ -1,24 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Concrete adapter classes for each registered parser engine.
+"""Stub. Model-specific parser adapters are removed from the lean build."""
 
-These are created via :func:`make_adapters` and exposed as module-level
-names so that :class:`ReasoningParserManager` and
-:class:`ToolParserManager` can load them lazily.
-"""
-
-from vllm.parser.deepseek_v4 import DeepSeekV4Parser
-from vllm.parser.deepseek_v32 import DeepSeekV32Parser
 from vllm.parser.engine.adapters import make_adapters
-from vllm.parser.gemma4 import Gemma4Parser
-from vllm.parser.glm47_moe import Glm47MoeParser
-from vllm.parser.inkling import InklingParser
-from vllm.parser.kimi_k2 import KimiK2Parser
-from vllm.parser.minimax_m2 import MinimaxM2Parser
-from vllm.parser.mistral import MistralParser
-from vllm.parser.nemotron_v3 import NemotronV3Parser
-from vllm.parser.qwen3 import Qwen3Parser
-from vllm.parser.seed_oss import SeedOssParser
+
+
+class _StubParser:
+    pass
+
+
+DeepSeekV32Parser = _StubParser
+DeepSeekV4Parser = _StubParser
+Gemma4Parser = _StubParser
+Glm47MoeParser = _StubParser
+InklingParser = _StubParser
+KimiK2Parser = _StubParser
+MinimaxM2Parser = _StubParser
+MistralParser = _StubParser
+NemotronV3Parser = _StubParser
+Qwen3Parser = _StubParser
+SeedOssParser = _StubParser
 
 (
     DeepSeekV32ParserReasoningAdapter,
@@ -52,7 +53,7 @@ from vllm.parser.seed_oss import SeedOssParser
 
 (
     SeedOssParserReasoningAdapter,
-    SeedOssParserToolAdapter,
+    SeedOSSParserToolAdapter,
 ) = make_adapters(SeedOssParser)
 
 (

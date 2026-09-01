@@ -1,45 +1,27 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-from vllm.lora.layers.base import BaseLayerWithLoRA
-from vllm.lora.layers.column_parallel_linear import (
-    ColumnParallelLinearWithLoRA,
-    ColumnParallelLinearWithShardedLoRA,
-    MergedColumnParallelLinearVariableSliceWithLoRA,
-    MergedColumnParallelLinearWithLoRA,
-    MergedColumnParallelLinearWithShardedLoRA,
-    MergedQKVParallelLinearWithLoRA,
-    MergedQKVParallelLinearWithShardedLoRA,
-    QKVParallelLinearWithLoRA,
-    QKVParallelLinearWithShardedLoRA,
-)
-from vllm.lora.layers.fused_moe import FusedMoE3DWithLoRA, FusedMoEWithLoRA
-from vllm.lora.layers.logits_processor import LogitsProcessorWithLoRA
-from vllm.lora.layers.replicated_linear import ReplicatedLinearWithLoRA
-from vllm.lora.layers.row_parallel_linear import (
-    RowParallelLinearWithLoRA,
-    RowParallelLinearWithShardedLoRA,
-)
-from vllm.lora.layers.utils import LoRAMapping, LoRAMappingType
-from vllm.lora.layers.vocal_parallel_embedding import VocabParallelEmbeddingWithLoRA
+"""LoRA layer stubs. LoRA adapter support is removed from the lean build."""
 
-__all__ = [
-    "BaseLayerWithLoRA",
-    "VocabParallelEmbeddingWithLoRA",
-    "LogitsProcessorWithLoRA",
-    "ColumnParallelLinearWithLoRA",
-    "ColumnParallelLinearWithShardedLoRA",
-    "MergedColumnParallelLinearWithLoRA",
-    "MergedColumnParallelLinearWithShardedLoRA",
-    "MergedColumnParallelLinearVariableSliceWithLoRA",
-    "MergedQKVParallelLinearWithLoRA",
-    "MergedQKVParallelLinearWithShardedLoRA",
-    "QKVParallelLinearWithLoRA",
-    "QKVParallelLinearWithShardedLoRA",
-    "RowParallelLinearWithLoRA",
-    "RowParallelLinearWithShardedLoRA",
-    "ReplicatedLinearWithLoRA",
-    "LoRAMapping",
-    "LoRAMappingType",
-    "FusedMoEWithLoRA",
-    "FusedMoE3DWithLoRA",
-]
+from enum import Enum
+from typing import Any
+
+import torch.nn as nn
+
+
+class LoRAMappingType(Enum):
+    LANGUAGE = 1
+    TOWER = 2
+    CONNECTOR = 3
+
+
+class LoRAMapping:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+
+class BaseLayerWithLoRA(nn.Module):
+    """No-op stub so isinstance checks don't break."""
+
+
+def try_get_optimal_moe_lora_config(*args: Any, **kwargs: Any) -> Any:
+    return None

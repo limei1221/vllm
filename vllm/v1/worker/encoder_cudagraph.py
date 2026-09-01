@@ -18,7 +18,9 @@ from vllm.model_executor.models.interfaces import (
     SupportsEncoderCudaGraph,
 )
 from vllm.model_executor.models.utils import scatter_output_slices
-from vllm.model_executor.models.vision import get_load_balance_assignment
+def get_load_balance_assignment(per_item_input_sizes, tp_size):
+    """No-op stub: vision load-balancing removed in the lean build."""
+    return list(range(len(per_item_input_sizes))), [len(per_item_input_sizes)], per_item_input_sizes
 from vllm.utils.gpu_sync_debug import gpu_sync_allowed
 from vllm.v1.worker.encoder_cudagraph_defs import (
     EncoderCudaGraphConfig,

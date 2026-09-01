@@ -1,16 +1,42 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""No-op stubs. EC transfer is removed from the lean build."""
 
-from vllm.distributed.ec_transfer.ec_transfer_state import (
-    ensure_ec_transfer_initialized,
-    ensure_ec_transfer_shutdown,
-    get_ec_transfer,
-    has_ec_transfer,
-)
+from typing import Any
 
-__all__ = [
-    "get_ec_transfer",
-    "ensure_ec_transfer_initialized",
-    "ensure_ec_transfer_shutdown",
-    "has_ec_transfer",
-]
+
+def get_ec_transfer(*args: Any, **kwargs: Any) -> Any:
+    return None
+
+
+def has_ec_transfer(*args: Any, **kwargs: Any) -> bool:
+    return False
+
+
+class ECConnectorBase:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+    def __getattr__(self, name: str) -> Any:
+        return lambda *a, **kw: None
+
+
+class ECConnectorMetadata:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+
+class ECConnectorFactory:
+    @staticmethod
+    def create(*args: Any, **kwargs: Any) -> Any:
+        return None
+
+
+class ECConnectorWorkerMetadata:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+
+class ECOutputAggregator:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+    def __getattr__(self, name: str) -> Any:
+        return lambda *a, **kw: None

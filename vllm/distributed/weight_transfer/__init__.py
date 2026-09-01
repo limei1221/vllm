@@ -1,36 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""
-Weight transfer engines for syncing model weights from trainers
-to inference workers.
-"""
+"""No-op stubs. Weight transfer is removed from the lean build."""
 
-from vllm.distributed.weight_transfer.base import (
-    ModuleSource,
-    ParamMeta,
-    TrainerWeightTransferEngine,
-    VLLMWeightSyncClient,
-    WeightSource,
-    WeightTransferEngine,
-)
-from vllm.distributed.weight_transfer.clients import (
-    HTTPVLLMWeightSyncClient,
-    RayVLLMWeightSyncClient,
-)
-from vllm.distributed.weight_transfer.factory import (
-    WeightTransferEngineFactory,
-    WeightTransferTrainerFactory,
-)
+from typing import Any
 
-__all__ = [
-    "WeightTransferEngine",
-    "WeightTransferEngineFactory",
-    "TrainerWeightTransferEngine",
-    "WeightTransferTrainerFactory",
-    "VLLMWeightSyncClient",
-    "HTTPVLLMWeightSyncClient",
-    "RayVLLMWeightSyncClient",
-    "ParamMeta",
-    "WeightSource",
-    "ModuleSource",
-]
+
+class WeightTransferManager:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+    def __getattr__(self, name: str) -> Any:
+        return lambda *a, **kw: None
+
+
+class BaseWeightTransferEngine:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+    def __getattr__(self, name: str) -> Any:
+        return lambda *a, **kw: None

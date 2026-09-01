@@ -1,29 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-from .context import BaseProcessingInfo, InputProcessingContext, TimingContext
-from .dummy_inputs import BaseDummyInputsBuilder
-from .inputs import ProcessorInputs
-from .processor import (
-    BaseMultiModalProcessor,
-    EncDecMultiModalProcessor,
-    PromptIndexTargets,
-    PromptInsertion,
-    PromptReplacement,
-    PromptUpdate,
-    PromptUpdateDetails,
-)
+from typing import Any
 
-__all__ = [
-    "BaseProcessingInfo",
-    "InputProcessingContext",
-    "TimingContext",
-    "BaseDummyInputsBuilder",
-    "ProcessorInputs",
-    "BaseMultiModalProcessor",
-    "EncDecMultiModalProcessor",
-    "PromptUpdate",
-    "PromptIndexTargets",
-    "PromptUpdateDetails",
-    "PromptInsertion",
-    "PromptReplacement",
-]
+ProcessorInputs = Any
+
+
+class BaseMultiModalProcessor:
+    """No-op processor stub."""
+
+
+class EncDecMultiModalProcessor(BaseMultiModalProcessor):
+    """No-op encoder-decoder processor stub."""
+
+
+class TimingContext:
+    """No-op context manager."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False

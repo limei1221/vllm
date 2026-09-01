@@ -1,20 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-from .audio import AudioEmbeddingMediaIO, AudioMediaIO
-from .base import MediaIO, MediaWithBytes
-from .connector import MEDIA_CONNECTOR_REGISTRY, MediaConnector
-from .image import ImageEmbeddingMediaIO, ImageMediaIO
-from .video import VIDEO_LOADER_REGISTRY, VideoMediaIO
+from typing import Any
 
-__all__ = [
-    "MediaIO",
-    "MediaWithBytes",
-    "AudioEmbeddingMediaIO",
-    "AudioMediaIO",
-    "ImageEmbeddingMediaIO",
-    "ImageMediaIO",
-    "VIDEO_LOADER_REGISTRY",
-    "VideoMediaIO",
-    "MEDIA_CONNECTOR_REGISTRY",
-    "MediaConnector",
-]
+MediaConnector = Any
+
+
+class _MediaConnectorRegistry:
+    def load(self, *args: Any, **kwargs: Any) -> Any:
+        return None
+
+    def register(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+
+MEDIA_CONNECTOR_REGISTRY = _MediaConnectorRegistry()

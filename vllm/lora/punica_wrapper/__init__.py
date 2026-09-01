@@ -1,10 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""No-op stub. Punica wrapper is removed from the lean build."""
 
-from vllm.lora.punica_wrapper.punica_base import PunicaWrapperBase
-from vllm.lora.punica_wrapper.punica_selector import get_punica_wrapper
+from typing import Any
 
-__all__ = [
-    "PunicaWrapperBase",
-    "get_punica_wrapper",
-]
+
+class PunicaWrapperBase:
+    """No-op stub."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+
+def get_punica_wrapper(*args: Any, **kwargs: Any) -> Any:
+    return None

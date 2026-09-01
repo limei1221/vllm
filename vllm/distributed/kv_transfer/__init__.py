@@ -1,20 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""No-op stubs. KV transfer is removed from the lean build."""
 
-from vllm.distributed.kv_transfer.kv_transfer_state import (
-    KVConnectorBaseType,
-    ensure_kv_transfer_initialized,
-    ensure_kv_transfer_shutdown,
-    get_kv_transfer_group,
-    has_kv_transfer_group,
-    is_v1_kv_transfer_group,
-)
+from typing import Any
 
-__all__ = [
-    "get_kv_transfer_group",
-    "has_kv_transfer_group",
-    "is_v1_kv_transfer_group",
-    "ensure_kv_transfer_initialized",
-    "ensure_kv_transfer_shutdown",
-    "KVConnectorBaseType",
-]
+
+def get_kv_transfer_group(*args: Any, **kwargs: Any) -> Any:
+    return None
+
+
+def has_kv_transfer_group(*args: Any, **kwargs: Any) -> bool:
+    return False
