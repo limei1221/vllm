@@ -91,8 +91,6 @@ from vllm.model_executor.models.interfaces import (
     supports_xdrope,
 )
 from vllm.model_executor.models.interfaces_base import (
-    VllmModelForPooling,
-    is_pooling_model,
     is_text_generation_model,
 )
 from vllm.model_executor.offloader import (
@@ -114,10 +112,9 @@ from vllm.multimodal.utils import (
     set_mm_embedding_modality,
 )
 from vllm.platforms import current_platform
-from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
-from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
+from vllm.tasks import GenerationTask, SupportedTask
 from vllm.tracing import instrument
 from vllm.utils import length_from_prompt_token_ids_or_embeds
 from vllm.utils.gpu_sync_debug import gpu_sync_allowed
@@ -179,14 +176,11 @@ from vllm.v1.outputs import (
     LogprobsLists,
     LogprobsTensors,
     ModelRunnerOutput,
-    PoolerOutput,
     RoutedExpertsLists,
     RoutedExpertsTensors,
     SamplerOutput,
     make_empty_encoder_model_runner_output,
 )
-from vllm.v1.pool.late_interaction_runner import LateInteractionRunner
-from vllm.v1.pool.metadata import PoolingMetadata, PoolingStates
 from vllm.v1.sample.logits_processor import LogitsProcessors, build_logitsprocs
 from vllm.v1.sample.logits_processor.interface import LogitsProcessor
 from vllm.v1.sample.metadata import SamplingMetadata
@@ -397,88 +391,8 @@ class AsyncGPUModelRunnerOutput(AsyncModelRunnerOutput):
         return output
 
 
-def _copy_pooler_output_to_cpu(
-    raw_pooler_output: PoolerOutput, finished_mask: list[bool]
-) -> list[torch.Tensor | None]:
-    num_reqs = len(finished_mask)
-
-    if isinstance(raw_pooler_output, torch.Tensor):
-        if raw_pooler_output.shape[0] != num_reqs:
-            raise ValueError(
-                "Pooler output batch size does not match finished mask size: "
-                f"{raw_pooler_output.shape[0]} != {num_reqs}."
-            )
-
-        num_finished = sum(finished_mask)
-        if num_finished == 0:
-            return [None] * num_reqs
-        if num_finished == num_reqs:
-            return list(raw_pooler_output.to("cpu", non_blocking=True))
-
-        # partial finished
-        finished_indices = [i for i, include in enumerate(finished_mask) if include]
-        index_tensor = torch.tensor(
-            finished_indices, device=raw_pooler_output.device, dtype=torch.long
-        )
-        finished_outputs = raw_pooler_output.index_select(0, index_tensor).to(
-            "cpu", non_blocking=True
-        )
-        partial_pooler_output: list[torch.Tensor | None] = [None] * num_reqs
-        for i, out in zip(finished_indices, finished_outputs):
-            partial_pooler_output[i] = out
-        return partial_pooler_output
-
-    assert isinstance(raw_pooler_output, list)
-    if len(raw_pooler_output) != num_reqs:
-        raise ValueError(
-            "Pooler output batch size does not match finished mask size: "
-            f"{len(raw_pooler_output)} != {num_reqs}."
-        )
-
-    pooler_output: list[torch.Tensor | None] = [None] * num_reqs
-    for i, (out, include) in enumerate(zip(raw_pooler_output, finished_mask)):
-        if include and out is not None:
-            pooler_output[i] = out.to("cpu", non_blocking=True)
-    return pooler_output
 
 
-class AsyncGPUPoolingModelRunnerOutput(AsyncModelRunnerOutput):
-    def __init__(
-        self,
-        model_runner_output: ModelRunnerOutput,
-        raw_pooler_output: PoolerOutput,
-        finished_mask: list[bool],
-        async_output_copy_stream: torch.cuda.Stream,
-    ):
-        self._model_runner_output = model_runner_output
-
-        # Event on the copy stream so we can synchronize the non-blocking copy.
-        # Blocking (sleep) event to avoid busy-polling the CUDA driver lock.
-        self.async_copy_ready_event = torch.cuda.Event(blocking=True)
-
-        # Keep a reference to the device tensors to avoid them being
-        # deallocated until we finish copying it to the host.
-        self._raw_pooler_output = raw_pooler_output
-
-        # Initiate the copy on a separate stream, but do not synchronize it.
-        default_stream = torch.cuda.current_stream()
-        with torch.cuda.stream(async_output_copy_stream):
-            async_output_copy_stream.wait_stream(default_stream)
-            self._model_runner_output.pooler_output = _copy_pooler_output_to_cpu(
-                raw_pooler_output=self._raw_pooler_output,
-                finished_mask=finished_mask,
-            )
-            self.async_copy_ready_event.record()
-
-    def get_output(self) -> ModelRunnerOutput:
-        """Copy the device tensors to the host and return a ModelRunnerOutput.
-        This function blocks until the copy is finished.
-        """
-        self.async_copy_ready_event.synchronize()
-
-        # Release the device tensors once the copy has completed.
-        del self._raw_pooler_output
-        return self._model_runner_output
 
 
 class ExecuteModelState(NamedTuple):
@@ -619,7 +533,6 @@ class GPUModelRunner(
 
         # mm_hash ->  encoder_output
         self.encoder_cache: dict[str, torch.Tensor] = {}
-        self.late_interaction_runner = LateInteractionRunner()
 
         # Encoder CUDA graph manager (initialized after model load if enabled)
         self.encoder_cudagraph_manager: EncoderCudaGraphManager | None = None
@@ -1013,7 +926,6 @@ class GPUModelRunner(
         """
         if self.mm_budget:
             self.mm_budget.reset_cache()
-        self.late_interaction_runner.clear()
 
     def reset_encoder_cache(self) -> None:
         """Clear the GPU-side encoder cache storing vision embeddings.
@@ -1022,7 +934,6 @@ class GPUModelRunner(
         stale embeddings computed with old weights are not reused.
         """
         self.encoder_cache.clear()
-        self.late_interaction_runner.clear()
 
     def post_kv_cache_wake_up(self) -> None:
         self.init_fp8_kv_scales()
@@ -1253,9 +1164,6 @@ class GPUModelRunner(
             req_state = self.requests.pop(req_id, None)
             self._on_request_state_removed(req_id, req_state)
             self.num_prompt_logprobs.pop(req_id, None)
-        self.late_interaction_runner.on_requests_finished(
-            scheduler_output.finished_req_ids
-        )
         # Remove the finished requests from the persistent batch.
         # NOTE(woosuk): There could be an edge case where finished_req_ids and
         # scheduled_req_ids overlap. This happens when a request is aborted and
@@ -1332,15 +1240,6 @@ class GPUModelRunner(
             else:
                 generator = None
 
-            if self.is_pooling_model:
-                assert pooling_params is not None
-                task = pooling_params.task
-                assert task is not None, "You did not set `task` in the API"
-
-                model = cast(VllmModelForPooling, self.get_model())
-                to_update = model.pooler.get_pooling_updates(task)
-                to_update.apply(pooling_params)
-
             req_state = CachedRequestState(
                 req_id=req_id,
                 prompt_token_ids=new_req_data.prompt_token_ids,
@@ -1356,7 +1255,6 @@ class GPUModelRunner(
                 lora_request=new_req_data.lora_request,
             )
             self.requests[req_id] = req_state
-            self.late_interaction_runner.register_request(req_id, pooling_params)
 
             if sampling_params and sampling_params.prompt_logprobs is not None:
                 self.num_prompt_logprobs[req_id] = (
@@ -1691,7 +1589,6 @@ class GPUModelRunner(
         req_state.prompt_embeds = new_req_data.prompt_embeds
         req_state.sampling_params = new_req_data.sampling_params
         req_state.pooling_params = new_req_data.pooling_params
-        self.late_interaction_runner.register_request(req_id, req_state.pooling_params)
         req_state.block_ids = new_req_data.block_ids
         req_state.num_computed_tokens = new_req_data.num_computed_tokens
         req_state.num_prompt_tokens = length_from_prompt_token_ids_or_embeds(
@@ -3447,20 +3344,12 @@ class GPUModelRunner(
 
         return supported_tasks
 
-    def get_supported_pooling_tasks(self) -> list[PoolingTask]:
-        model = self.get_model()
-        if not is_pooling_model(model):
-            return []
-
-        return list(model.pooler.get_supported_tasks())
 
     def get_supported_tasks(self) -> tuple[SupportedTask, ...]:
         tasks = list[SupportedTask]()
 
         if self.model_config.runner_type == "generate":
             tasks.extend(self.get_supported_generation_tasks())
-        if self.model_config.runner_type == "pooling":
-            tasks.extend(self.get_supported_pooling_tasks())
 
         return tuple(tasks)
 
@@ -3525,71 +3414,6 @@ class GPUModelRunner(
             num_valid_physical_experts=old_num_physical_experts,
         )
 
-    def _pool(
-        self,
-        hidden_states: torch.Tensor,
-        num_scheduled_tokens: int,
-        num_scheduled_tokens_np: np.ndarray,
-        kv_connector_output: KVConnectorOutput | None,
-    ) -> ModelRunnerOutput | AsyncModelRunnerOutput:
-        num_reqs = self.input_batch.num_reqs
-        assert num_reqs == len(self.input_batch.pooling_params), (
-            "Either all or none of the requests in a batch must be pooling request"
-        )
-
-        hidden_states = hidden_states[:num_scheduled_tokens]
-        seq_lens_cpu = self.optimistic_seq_lens_cpu[:num_reqs]
-
-        pooling_metadata = self.input_batch.get_pooling_metadata()
-        pooling_metadata.build_pooling_cursor(
-            num_scheduled_tokens_np,
-            seq_lens_cpu,
-            device=hidden_states.device,
-            query_start_loc_gpu=self.query_start_loc.gpu[: num_reqs + 1],
-        )
-
-        model = cast(VllmModelForPooling, self.model)
-        raw_pooler_output: PoolerOutput = model.pooler(
-            hidden_states=hidden_states, pooling_metadata=pooling_metadata
-        )
-
-        finished_mask = [
-            seq_len == prompt_len
-            for seq_len, prompt_len in zip(seq_lens_cpu, pooling_metadata.prompt_lens)
-        ]
-        raw_pooler_output = self.late_interaction_runner.postprocess_pooler_output(
-            raw_pooler_output=raw_pooler_output,
-            pooling_params=pooling_metadata.pooling_params,
-            req_ids=self.input_batch.req_ids,
-            finished_mask=finished_mask,
-        )
-
-        model_runner_output = ModelRunnerOutput(
-            req_ids=self.input_batch.req_ids.copy(),
-            req_id_to_index=self.input_batch.req_id_to_index.copy(),
-            kv_connector_output=kv_connector_output,
-        )
-
-        if raw_pooler_output is None or not any(finished_mask):
-            self._sync_device()
-            model_runner_output.pooler_output = [None] * num_reqs
-            return model_runner_output
-
-        if not current_platform.is_cuda_alike():
-            # cpu/xpu runners cannot use the CUDA stream/event-based wrapper.
-            model_runner_output.pooler_output = _copy_pooler_output_to_cpu(
-                raw_pooler_output=raw_pooler_output,
-                finished_mask=finished_mask,
-            )
-            self._sync_device()
-            return model_runner_output
-
-        return AsyncGPUPoolingModelRunnerOutput(
-            model_runner_output=model_runner_output,
-            raw_pooler_output=raw_pooler_output,
-            finished_mask=finished_mask,
-            async_output_copy_stream=self._get_or_create_async_output_copy_stream(),
-        )
 
     def _pad_for_sequence_parallelism(self, num_scheduled_tokens: int) -> int:
         # Pad tokens to multiple of tensor_parallel_size when
@@ -4586,15 +4410,6 @@ class GPUModelRunner(
                     assert isinstance(hidden_states, IntermediateTensors)
                     self.kv_connector_output = kv_connector_output
                     return hidden_states
-
-                if self.is_pooling_model:
-                    # Return the pooling output.
-                    return self._pool(
-                        hidden_states,
-                        num_scheduled_tokens,
-                        num_scheduled_tokens_np,
-                        kv_connector_output,
-                    )
 
                 sample_hidden_states = hidden_states[logits_indices]
                 logits = self.model.compute_logits(sample_hidden_states)
@@ -6468,92 +6283,7 @@ class GPUModelRunner(
             torch.accelerator.synchronize()
         return sampler_output
 
-    def _dummy_pooler_run_task(
-        self,
-        hidden_states: torch.Tensor,
-        task: PoolingTask,
-    ) -> PoolerOutput:
-        num_tokens = hidden_states.shape[0]
-        max_num_reqs = self.scheduler_config.max_num_seqs
-        num_reqs = min(num_tokens, max_num_reqs)
-        min_tokens_per_req = num_tokens // num_reqs
-        num_scheduled_tokens_np = np.full(num_reqs, min_tokens_per_req)
-        num_scheduled_tokens_np[-1] += num_tokens % num_reqs
-        assert np.sum(num_scheduled_tokens_np) == num_tokens
-        assert len(num_scheduled_tokens_np) == num_reqs
 
-        req_num_tokens = num_tokens // num_reqs
-
-        dummy_prompt_lens = torch.from_numpy(num_scheduled_tokens_np)
-        dummy_token_ids = torch.zeros(
-            (num_reqs, req_num_tokens), dtype=torch.int32, device=self.device
-        )
-
-        model = cast(VllmModelForPooling, self.get_model())
-        dummy_pooling_params = PoolingParams(task=task)
-        dummy_pooling_params.verify(self.model_config)
-        to_update = model.pooler.get_pooling_updates(task)
-        to_update.apply(dummy_pooling_params)
-
-        dummy_metadata = PoolingMetadata(
-            prompt_lens=dummy_prompt_lens,
-            prompt_token_ids=dummy_token_ids,
-            prompt_token_ids_cpu=dummy_token_ids.cpu(),
-            pooling_params=[dummy_pooling_params] * num_reqs,
-            pooling_states=[PoolingStates() for i in range(num_reqs)],
-        )
-
-        dummy_metadata.build_pooling_cursor(
-            num_scheduled_tokens_np,
-            seq_lens_cpu=dummy_prompt_lens,
-            device=hidden_states.device,
-        )
-
-        try:
-            return model.pooler(
-                hidden_states=hidden_states, pooling_metadata=dummy_metadata
-            )
-        except RuntimeError as e:
-            if "out of memory" in str(e):
-                raise RuntimeError(
-                    "CUDA out of memory occurred when warming up pooler "
-                    f"({task=}) with {num_reqs} dummy requests. Please try "
-                    "lowering `max_num_seqs` or `gpu_memory_utilization` when "
-                    "initializing the engine."
-                ) from e
-            else:
-                raise e
-
-    @torch.inference_mode()
-    def _dummy_pooler_run(
-        self,
-        hidden_states: torch.Tensor,
-    ) -> PoolerOutput:
-        mm_config = self.vllm_config.model_config.multimodal_config
-        if mm_config and mm_config.mm_encoder_only:
-            # MM Encoder only model not need to run pooler.
-            return torch.tensor([])
-
-        # Find the task that has the largest output for subsequent steps
-        supported_pooling_tasks = self.get_supported_pooling_tasks()
-
-        if not supported_pooling_tasks:
-            raise RuntimeError(
-                f"Model {self.model_config.model} does not support "
-                "any pooling tasks. See "
-                "https://docs.vllm.ai/en/latest/models/pooling_models.html "
-                "to learn more."
-            )
-
-        output_size = dict[PoolingTask, float]()
-        for task in supported_pooling_tasks:
-            # Run a full batch with each task to ensure none of them OOMs
-            output = self._dummy_pooler_run_task(hidden_states, task)
-            output_size[task] = sum(o.nbytes for o in output if o is not None)
-            del output  # Allow GC
-
-        max_task = max(output_size.items(), key=lambda x: x[1])[0]
-        return self._dummy_pooler_run_task(hidden_states, max_task)
 
     def profile_run(self) -> None:
         # Profile with multimodal encoder & encoder cache.
@@ -6619,10 +6349,7 @@ class GPUModelRunner(
             self.max_num_tokens, is_profile=True
         )
         if get_pp_group().is_last_rank:
-            if self.is_pooling_model:
-                output = self._dummy_pooler_run(hidden_states)
-            else:
-                output = self._dummy_sampler_run(last_hidden_states)
+            output = self._dummy_sampler_run(last_hidden_states)
         else:
             output = None
         self._sync_device()

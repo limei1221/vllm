@@ -9,7 +9,6 @@ from typing import Any
 
 import torch
 from torch import nn
-from typing_extensions import assert_never
 
 import vllm.envs as envs
 from vllm.config import ModelConfig, VllmConfig, set_current_vllm_config
@@ -186,7 +185,6 @@ _MODEL_ARCH_BY_HASH = dict[int, tuple[type[nn.Module], str]]()
 
 
 def _get_model_architecture(model_config: ModelConfig) -> tuple[type[nn.Module], str]:
-    from vllm.model_executor.models.adapters import as_embedding_model, as_seq_cls_model
 
     architectures = getattr(model_config.hf_config, "architectures", None) or []
 
@@ -205,17 +203,11 @@ def _get_model_architecture(model_config: ModelConfig) -> tuple[type[nn.Module],
                 arch,
             )
 
-    convert_type = model_config.convert_type
-    if convert_type == "none":
-        pass
-    elif convert_type == "embed":
-        logger.debug_once("Converting to embedding model.")
-        model_cls = as_embedding_model(model_cls)
-    elif convert_type == "classify":
-        logger.debug_once("Converting to sequence classification model.")
-        model_cls = as_seq_cls_model(model_cls)
-    else:
-        assert_never(convert_type)
+    if model_config.convert_type != "none":
+        raise ValueError(
+            "Pooling model conversion (embed/classify) was removed from this "
+            f"tree; got convert_type={model_config.convert_type!r}."
+        )
 
     return model_cls, arch
 
