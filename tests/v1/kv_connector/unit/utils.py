@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-import tempfile
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -26,9 +25,6 @@ from vllm.distributed.kv_transfer.kv_connector.v1.base import (
     KVConnectorRole,
     KVConnectorWorkerMetadata,
 )
-from vllm.distributed.kv_transfer.kv_connector.v1.example_connector import (  # noqa
-    ExampleConnector,
-)
 from vllm.utils.hashing import sha256
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks
 from vllm.v1.core.kv_cache_utils import get_request_block_hasher, init_none_hash
@@ -46,7 +42,6 @@ from vllm.v1.request import Request
 from vllm.v1.structured_output import StructuredOutputManager
 
 EOS_TOKEN_ID = 50256
-
 
 def assert_scheduler_empty(scheduler: Scheduler):
     """Confirm the scheduler is "empty" - i.e. no leaks."""
@@ -86,7 +81,6 @@ def assert_scheduler_empty(scheduler: Scheduler):
     # value, etc will remain since we lazily evict for prefix cache.
     for block in scheduler.kv_cache_manager.block_pool.blocks:
         assert block.ref_cnt == 0
-
 
 def create_vllm_config(
     model: str = "facebook/opt-125m",
@@ -148,7 +142,6 @@ def create_vllm_config(
         attention_config=attention_config,
     )
 
-
 def create_scheduler(
     vllm_config: VllmConfig,
     num_blocks: int = 10000,
@@ -185,10 +178,8 @@ def create_scheduler(
         block_size=block_size,
     )
 
-
 _request_count = count(1)
 _none_hash_initialized = False
-
 
 def create_request(
     request_id: int | None = None,
@@ -248,7 +239,6 @@ def create_request(
     req.kv_transfer_params = kv_transfer_params
     return req
 
-
 def create_model_runner_output(
     reqs: list[Request],
     finished_sending: set[str] | None = None,
@@ -295,69 +285,6 @@ def create_model_runner_output(
         kv_connector_output=kv_connector_output,
     )
 
-
-class TestExampleConnector(ExampleConnector):
-    def __init__(
-        self,
-        config: VllmConfig,
-        role: KVConnectorRole,
-        kv_cache_config: KVCacheConfig,
-    ):
-        self.name = config.kv_transfer_config.kv_connector_extra_config["name"]
-        self._connector = ExampleConnector(config, role, kv_cache_config)
-        self.call_record: dict[str, int] = defaultdict(int)
-        # Use a unique temp file per connector
-        self._event_file = (
-            tempfile.gettempdir()
-            + f"/connector_{self.name}-{self.role.name}_events.log"
-        )
-        # Start with an empty file
-        with open(self._event_file, "w") as _:
-            pass
-
-    def __getattribute__(self, name):
-        if name in (
-            "_connector",
-            "call_record",
-            "name",
-            "_event_file",
-            "__class__",
-            "__dict__",
-            "__getattribute__",
-            "__init__",
-        ):  # avoid recursion
-            return object.__getattribute__(self, name)
-        if not hasattr(self._connector, name):
-            return object.__getattribute__(self, name)
-        attr = getattr(self._connector, name)
-
-        # Intercept calls to the connector interface and write an event
-        # for each one to a file, which can be read back in the main test proc.
-        if callable(attr):
-
-            def wrapper(*args, **kwargs):
-                self.call_record[name] += 1
-
-                # Include args that we're interested in
-                to_log = [name]
-                for arg in args:
-                    if isinstance(arg, int):
-                        to_log.append(str(arg))
-                    elif isinstance(arg, KVCacheBlocks):
-                        to_log.append(f"num_blocks={[len(b) for b in arg.blocks]}")
-
-                # Log the event as a line to the file
-                try:
-                    with open(self._event_file, "a") as f:
-                        f.write(" ".join(to_log) + "\n")
-                except Exception as e:
-                    print(f"[ERROR] Could not log event {name} for {self.name}: {e}")
-                return attr(*args, **kwargs)
-
-            return wrapper
-        return attr
-
-
 @dataclass(frozen=True)
 class MockKVConfig:
     matched_tokens: int = 0
@@ -365,12 +292,10 @@ class MockKVConfig:
     num_defers_before_matching: int = 0
     supports_divergent_local_hybrid_hits: bool = False
 
-
 class MockKVConnectorMetadata(KVConnectorMetadata):
     def __init__(self):
         # Scheduler tests check metadata.requests
         self.requests: list = []
-
 
 class MockKVConnector(KVConnectorBase_V1):
     """Mock KV connector for scheduler tests, supporting both sync and async mode."""
@@ -447,15 +372,9 @@ class MockKVConnector(KVConnectorBase_V1):
     def wait_for_save(self):
         pass
 
-
-KVConnectorFactory.register_connector(
-    "TestExampleConnector", __name__, TestExampleConnector.__name__
-)
-
 KVConnectorFactory.register_connector(
     "MockKVConnector", __name__, MockKVConnector.__name__
 )
-
 
 def make_kv_cache_config(
     block_size: int,
@@ -503,7 +422,6 @@ def make_kv_cache_config(
         num_blocks=num_blocks, kv_cache_tensors=[], kv_cache_groups=kv_cache_groups
     )
 
-
 def make_nixl_scheduler(
     has_mamba: bool = False,
     is_hma_required: bool = False,
@@ -542,7 +460,6 @@ def make_nixl_scheduler(
         sched.blocks_per_sw = []
         sched.is_bidirectional_kv_xfer_enabled = False
     return sched
-
 
 def make_nixl_push_scheduler(
     *,

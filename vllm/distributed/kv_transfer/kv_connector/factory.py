@@ -23,7 +23,6 @@ if TYPE_CHECKING:
 
 logger = init_logger(__name__)
 
-
 class KVConnectorFactory:
     _registry: dict[str, Callable[[], type[KVConnectorBase]]] = {}
 
@@ -135,108 +134,9 @@ class KVConnectorFactory:
         SupportsHMA, but effective support depends on every configured child.
         """
         connector_cls = cls.get_connector_class(kv_transfer_config)
-        if kv_transfer_config.kv_connector != "MultiConnector":
-            return supports_hma(connector_cls)
-
-        from vllm.distributed.kv_transfer.kv_connector.v1.multi_connector import (
-            MultiConnector,
-        )
-
-        return MultiConnector.all_children_support_hma(kv_transfer_config)
-
+        return supports_hma(connector_cls)
 
 # Register various connectors here.
 # The registration should not be done in each individual file, as we want to
 # only load the files corresponding to the current connector.
 
-KVConnectorFactory.register_connector(
-    "ExampleConnector",
-    "vllm.distributed.kv_transfer.kv_connector.v1.example_connector",
-    "ExampleConnector",
-)
-
-KVConnectorFactory.register_connector(
-    "ExampleHiddenStatesConnector",
-    "vllm.distributed.kv_transfer.kv_connector.v1.example_hidden_states_connector",
-    "ExampleHiddenStatesConnector",
-)
-
-KVConnectorFactory.register_connector(
-    "LMCacheConnectorV1",
-    "vllm.distributed.kv_transfer.kv_connector.v1.lmcache_connector",
-    "LMCacheConnectorV1",
-)
-
-KVConnectorFactory.register_connector(
-    "LMCacheMPConnector",
-    "vllm.distributed.kv_transfer.kv_connector.v1.lmcache_mp_connector",
-    "LMCacheMPConnector",
-)
-
-KVConnectorFactory.register_connector(
-    "NixlConnector",
-    "vllm.distributed.kv_transfer.kv_connector.v1.nixl",
-    "NixlConnector",
-)
-
-KVConnectorFactory.register_connector(
-    "NixlPullConnector",
-    "vllm.distributed.kv_transfer.kv_connector.v1.nixl",
-    "NixlPullConnector",
-)
-
-KVConnectorFactory.register_connector(
-    "NixlPushConnector",
-    "vllm.distributed.kv_transfer.kv_connector.v1.nixl",
-    "NixlPushConnector",
-)
-
-KVConnectorFactory.register_connector(
-    "MultiConnector",
-    "vllm.distributed.kv_transfer.kv_connector.v1.multi_connector",
-    "MultiConnector",
-)
-
-KVConnectorFactory.register_connector(
-    "MoRIIOConnector",
-    "vllm.distributed.kv_transfer.kv_connector.v1.moriio.moriio_connector",
-    "MoRIIOConnector",
-)
-
-KVConnectorFactory.register_connector(
-    "OffloadingConnector",
-    "vllm.distributed.kv_transfer.kv_connector.v1.offloading_connector",
-    "OffloadingConnector",
-)
-
-KVConnectorFactory.register_connector(
-    "DecodeBenchConnector",
-    "vllm.distributed.kv_transfer.kv_connector.v1.decode_bench_connector",
-    "DecodeBenchConnector",
-)
-
-KVConnectorFactory.register_connector(
-    "MooncakeConnector",
-    "vllm.distributed.kv_transfer.kv_connector.v1.mooncake.mooncake_connector",
-    "MooncakeConnector",
-)
-KVConnectorFactory.register_connector(
-    "MooncakeStoreConnector",
-    "vllm.distributed.kv_transfer.kv_connector.v1.mooncake.store.connector",
-    "MooncakeStoreConnector",
-)
-KVConnectorFactory.register_connector(
-    "FlexKVConnectorV1",
-    "vllm.distributed.kv_transfer.kv_connector.v1.flexkv_connector",
-    "FlexKVConnectorV1",
-)
-KVConnectorFactory.register_connector(
-    "SimpleCPUOffloadConnector",
-    "vllm.distributed.kv_transfer.kv_connector.v1.simple_cpu_offload_connector",
-    "SimpleCPUOffloadConnector",
-)
-KVConnectorFactory.register_connector(
-    "HF3FSKVConnector",
-    "vllm.distributed.kv_transfer.kv_connector.v1.hf3fs.hf3fs_connector",
-    "HF3FSKVConnector",
-)

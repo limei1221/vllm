@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 
 logger = init_logger(__name__)
 
-
 class ECConnectorFactory:
     _registry: dict[str, Callable[[], type[ECConnectorBase]]] = {}
 
@@ -73,19 +72,7 @@ class ECConnectorFactory:
             connector_cls = getattr(connector_module, connector_name)
         return connector_cls
 
-
 # Register various connectors here.
 # The registration should not be done in each individual file, as we want to
 # only load the files corresponding to the current connector.
 
-ECConnectorFactory.register_connector(
-    "ECExampleConnector",
-    "vllm.distributed.ec_transfer.ec_connector.example_connector",
-    "ECExampleConnector",
-)
-
-ECConnectorFactory.register_connector(
-    "ECCPUConnector",
-    "vllm.distributed.ec_transfer.ec_connector.cpu.connector",
-    "ECCPUConnector",
-)

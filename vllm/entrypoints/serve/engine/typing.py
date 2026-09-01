@@ -29,11 +29,6 @@ from vllm.entrypoints.serve.tokenize.protocol import (
     TokenizeCompletionRequest,
     TokenizeResponse,
 )
-from vllm.entrypoints.speech_to_text.transcription.protocol import (
-    TranscriptionRequest,
-    TranscriptionResponse,
-)
-from vllm.entrypoints.speech_to_text.translation.protocol import TranslationRequest
 from vllm.renderers import ChatParams, TokenizeParams
 
 
@@ -67,12 +62,9 @@ ChatLikeRequest: TypeAlias = (
     | DerenderChatStreamRequest
 )
 
-SpeechToTextRequest: TypeAlias = TranscriptionRequest | TranslationRequest
-
 AnyRequest: TypeAlias = (
     CompletionLikeRequest
     | ChatLikeRequest
-    | SpeechToTextRequest
     | ResponsesRequest
     | GenerateRequest
 )
@@ -80,7 +72,6 @@ AnyRequest: TypeAlias = (
 AnyResponse: TypeAlias = (
     CompletionResponse
     | ChatCompletionResponse
-    | TranscriptionResponse
     | TokenizeResponse
     | GenerateResponse
 )

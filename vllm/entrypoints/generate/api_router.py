@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 
-import vllm.envs as envs
 
 if TYPE_CHECKING:
     from argparse import Namespace
@@ -37,18 +36,6 @@ def register_generate_api_routers(app: FastAPI):
 
     register_completion_api_router(app)
 
-    from vllm.entrypoints.anthropic.api_router import (
-        attach_router as register_anthropic_api_router,
-    )
-
-    register_anthropic_api_router(app)
-
-    from vllm.entrypoints.cohere.api_router import (
-        attach_router as register_cohere_api_router,
-    )
-
-    register_cohere_api_router(app)
-
     from .generative_scoring.api_router import register_generative_scoring_api_router
 
     register_generative_scoring_api_router(app)
@@ -61,24 +48,7 @@ async def init_generate_state(
     request_logger: RequestLogger | None,
     supported_tasks: tuple["SupportedTask", ...],
 ):
-    from vllm.entrypoints.anthropic.serving import AnthropicServingMessages
     from vllm.entrypoints.chat_utils import load_chat_template
-
-    # The Cohere serving handler depends on the optional `cohere` SDK for
-    # its wire-format protocol models, and is additionally gated on the
-    # `VLLM_ENABLE_COHERE_API` env flag (see
-    # `vllm.entrypoints.cohere.api_router.attach_router`). Skip the import
-    # entirely when the endpoint isn't going to be exposed, both because
-    # the SDK may not be installed and because the serving object holds
-    # nontrivial state (chat handler, warmup) that would otherwise be
-    # unused.
-    if envs.VLLM_ENABLE_COHERE_API:
-        try:
-            from vllm.entrypoints.cohere.serving import CohereServingChatV2
-        except ImportError:
-            CohereServingChatV2 = None  # type: ignore[assignment,misc]
-    else:
-        CohereServingChatV2 = None  # type: ignore[assignment,misc]
 
     from vllm.entrypoints.mcp.tool_server import (
         DemoToolServer,
@@ -192,48 +162,6 @@ async def init_generate_state(
         if "generate" in supported_tasks
         else None
     )
-    state.anthropic_serving_messages = (
-        AnthropicServingMessages(
-            engine_client,
-            state.openai_serving_models,
-            args.response_role,
-            online_renderer=state.online_renderer,
-            request_logger=request_logger,
-            chat_template=resolved_chat_template,
-            chat_template_content_format=args.chat_template_content_format,
-            return_tokens_as_token_ids=args.return_tokens_as_token_ids,
-            enable_auto_tools=args.enable_auto_tool_choice,
-            tool_parser=args.tool_call_parser,
-            reasoning_parser=args.structured_outputs_config.reasoning_parser,
-            enable_prompt_tokens_details=args.enable_prompt_tokens_details,
-            enable_force_include_usage=args.enable_force_include_usage,
-            default_chat_template_kwargs=default_chat_template_kwargs,
-        )
-        if "generate" in supported_tasks
-        else None
-    )
-    state.cohere_serving_chat_v2 = (
-        CohereServingChatV2(
-            engine_client,
-            state.openai_serving_models,
-            args.response_role,
-            online_renderer=state.online_renderer,
-            request_logger=request_logger,
-            chat_template=resolved_chat_template,
-            chat_template_content_format=args.chat_template_content_format,
-            return_tokens_as_token_ids=args.return_tokens_as_token_ids,
-            enable_auto_tools=args.enable_auto_tool_choice,
-            tool_parser=args.tool_call_parser,
-            reasoning_parser=args.structured_outputs_config.reasoning_parser,
-            enable_prompt_tokens_details=args.enable_prompt_tokens_details,
-            enable_force_include_usage=args.enable_force_include_usage,
-            default_chat_template_kwargs=default_chat_template_kwargs,
-            is_reasoning_model=args.cohere_is_reasoning_model,
-        )
-        if CohereServingChatV2 is not None and "generate" in supported_tasks
-        else None
-    )
-
     from .generative_scoring.serving import ServingGenerativeScoring
 
     state.serving_generative_scoring = ServingGenerativeScoring(

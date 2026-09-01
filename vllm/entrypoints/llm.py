@@ -39,7 +39,6 @@ from vllm.entrypoints.chat_utils import (
     load_chat_template,
 )
 from vllm.entrypoints.generate.beam_search.offline import BeamSearchOfflineMixin
-from vllm.entrypoints.pooling.offline import PoolingOfflineMixin
 from vllm.entrypoints.serve.utils.api_utils import log_non_default_args
 from vllm.inputs import PromptType
 from vllm.logger import init_logger
@@ -64,7 +63,7 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 
 
-class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
+class LLM(BeamSearchOfflineMixin, OfflineInferenceMixin):
     """An LLM for generating texts from given prompts and sampling parameters.
 
     This class includes a tokenizer, a language model (possibly distributed
@@ -374,7 +373,6 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
                 self.model_config.renderer_num_workers,
             )
 
-        PoolingOfflineMixin.__init__(self)
 
         # Cache for __repr__ to avoid repeated collective_rpc calls
         self._cached_repr: str | None = None

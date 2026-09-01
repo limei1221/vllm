@@ -11,7 +11,6 @@ from vllm.entrypoints.openai.models.serving import (
     OpenAIModelRegistry,
     OpenAIServingModels,
 )
-from vllm.entrypoints.pooling.typing import AnyPoolingRequest
 from vllm.entrypoints.serve import create_error_response
 from vllm.entrypoints.serve.engine.typing import AnyRequest
 from vllm.entrypoints.serve.utils.request_logger import RequestLogger
@@ -39,7 +38,7 @@ class BaseServing:
 
     async def _check_model(
         self,
-        request: AnyRequest | AnyPoolingRequest,
+        request: AnyRequest,
     ) -> ErrorResponse | None:
         error_response = None
 
@@ -125,7 +124,7 @@ class BaseServing:
 
         return random_uuid() if default is None else default
 
-    def _get_message_types(self, request: AnyRequest | AnyPoolingRequest) -> set[str]:
+    def _get_message_types(self, request: AnyRequest) -> set[str]:
         """Retrieve the set of types from message content dicts up
         until `_`; we use this to match potential multimodal data
         with default per modality loras.
@@ -151,7 +150,7 @@ class BaseServing:
         return message_types
 
     def _get_active_default_mm_loras(
-        self, request: AnyRequest | AnyPoolingRequest
+        self, request: AnyRequest
     ) -> LoRARequest | None:
         """Determine if there are any active default multimodal loras."""
         # TODO: Currently this is only enabled for chat completions
@@ -177,7 +176,7 @@ class BaseServing:
 
     def _maybe_get_adapters(
         self,
-        request: AnyRequest | AnyPoolingRequest,
+        request: AnyRequest,
         supports_default_mm_loras: bool = False,
     ) -> LoRARequest | None:
         if request.model in self.models.lora_requests:

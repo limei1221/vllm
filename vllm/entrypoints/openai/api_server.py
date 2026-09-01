@@ -49,7 +49,7 @@ from vllm.logger import init_logger
 from vllm.reasoning import ReasoningParserManager
 from vllm.renderers.online_derenderer import OnlineDerenderer
 from vllm.renderers.online_renderer import OnlineRenderer
-from vllm.tasks import POOLING_TASKS, SupportedTask
+from vllm.tasks import SupportedTask
 from vllm.tool_parsers import ToolParserManager
 from vllm.tracing import instrument
 from vllm.usage.usage_lib import UsageContext
@@ -240,23 +240,6 @@ def build_app(
 
         elastic_ep_attach_router(app)
 
-    if "generate" in supported_tasks or "render" in supported_tasks:
-        from vllm.entrypoints.scale_out.factories import register_scale_out_api_routers
-
-        register_scale_out_api_routers(app, supported_tasks)
-
-    if "transcription" in supported_tasks or "realtime" in supported_tasks:
-        from vllm.entrypoints.speech_to_text.factories import (
-            register_speech_to_text_api_routers,
-        )
-
-        register_speech_to_text_api_routers(app, supported_tasks)
-
-    if any(task in POOLING_TASKS for task in supported_tasks):
-        from vllm.entrypoints.pooling.factories import register_pooling_api_routers
-
-        register_pooling_api_routers(app, supported_tasks, model_config)
-
     if args.enable_fault_tolerance:
         from vllm.entrypoints.serve.fault_tolerance.api_router import (
             register_fault_tolerance_api_router,
@@ -294,14 +277,6 @@ def build_app(
 
     # Add scaling middleware to check for scaling state
     app.add_middleware(ScalingMiddleware)
-
-    if "realtime" in supported_tasks:
-        # Add WebSocket metrics middleware
-        from vllm.entrypoints.speech_to_text.factories import (
-            add_websocket_metrics_middleware,
-        )
-
-        add_websocket_metrics_middleware(app)
 
     if envs.VLLM_DEBUG_LOG_API_SERVER_RESPONSE:
         logger.warning(
@@ -435,21 +410,6 @@ async def init_app_state(
             engine_client, state, args, request_logger, supported_tasks
         )
 
-        from vllm.entrypoints.scale_out.factories import init_scale_out_state
-
-        init_scale_out_state(state, args, engine_client, request_logger)
-
-    if "transcription" in supported_tasks or "realtime" in supported_tasks:
-        from vllm.entrypoints.speech_to_text.factories import init_speech_to_text_state
-
-        init_speech_to_text_state(
-            engine_client, state, args, request_logger, supported_tasks
-        )
-
-    if any(task in POOLING_TASKS for task in supported_tasks):
-        from vllm.entrypoints.pooling.factories import init_pooling_state
-
-        init_pooling_state(engine_client, state, args, request_logger, supported_tasks)
 
     await _init_endpoint_plugins_state(engine_client, state, args)
 
@@ -533,9 +493,6 @@ async def init_render_app_state(
         trust_request_chat_template=args.trust_request_chat_template,
     )
 
-    from vllm.entrypoints.scale_out.factories import init_render_state
-
-    init_render_state(state, request_logger)
 
     state.vllm_config = vllm_config
     # Disable stats logging — there is no engine to poll.
