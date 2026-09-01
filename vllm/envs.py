@@ -126,10 +126,6 @@ if TYPE_CHECKING:
     VLLM_DP_MASTER_IP: str = ""
     VLLM_DP_MASTER_PORT: int = 0
     VLLM_RANDOMIZE_DP_DUMMY_INPUTS: bool = False
-    VLLM_RAY_DP_PACK_STRATEGY: Literal["strict", "fill", "span"] = "strict"
-    VLLM_RAY_DP_PLACEMENT_NODE_IPS: str = ""
-    VLLM_RAY_EXTRA_ENV_VAR_PREFIXES_TO_COPY: str = ""
-    VLLM_RAY_EXTRA_ENV_VARS_TO_COPY: str = ""
     VLLM_MARLIN_USE_ATOMIC_ADD: bool = False
     VLLM_MARLIN_INPUT_DTYPE: Literal["int8", "fp8"] | None = None
     VLLM_HUMMING_ONLINE_QUANT_CONFIG: dict[str, Any] | None = None
@@ -1005,7 +1001,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "VLLM_RANDOMIZE_DP_DUMMY_INPUTS": lambda: (
         os.environ.get("VLLM_RANDOMIZE_DP_DUMMY_INPUTS", "0") == "1"
     ),
-    # Strategy to pack the data parallel ranks for Ray.
+    # Strategy to pack the data parallel ranks.
     # Available options:
     # - "fill":
     #   for DP master node, allocate exactly data-parallel-size-local DP ranks,
@@ -1013,32 +1009,6 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # - "strict":
     #   allocate exactly data-parallel-size-local DP ranks to each picked node;
     # - "span":
-    #   Should be used only when a single DP rank requires multiple nodes.
-    #   allocate one DP rank over as many nodes as required for set world_size;
-    # This environment variable is ignored if data-parallel-backend is not Ray.
-    "VLLM_RAY_DP_PACK_STRATEGY": lambda: os.getenv(
-        "VLLM_RAY_DP_PACK_STRATEGY", "strict"
-    ),
-    # Optional comma-separated list of node IPs that Ray data-parallel
-    # placement groups may use. When set, create_dp_placement_groups only
-    # considers these nodes (the DP master node is always included).
-    # This environment variable is ignored if data-parallel-backend is not Ray.
-    "VLLM_RAY_DP_PLACEMENT_NODE_IPS": lambda: os.getenv(
-        "VLLM_RAY_DP_PLACEMENT_NODE_IPS", ""
-    ),
-    # Comma-separated *additional* prefixes of env vars to copy from the
-    # driver to Ray workers.  These are merged with the built-in defaults
-    # defined in ``vllm.ray.ray_env`` (VLLM_, etc.).  Example: "MYLIB_,OTHER_"
-    "VLLM_RAY_EXTRA_ENV_VAR_PREFIXES_TO_COPY": lambda: os.getenv(
-        "VLLM_RAY_EXTRA_ENV_VAR_PREFIXES_TO_COPY", ""
-    ),
-    # Comma-separated *additional* individual env var names to copy from
-    # the driver to Ray workers.  Merged with the built-in defaults
-    # defined in ``vllm.ray.ray_env`` (PYTHONHASHSEED).
-    # Example: "MY_SECRET,MY_FLAG"
-    "VLLM_RAY_EXTRA_ENV_VARS_TO_COPY": lambda: os.getenv(
-        "VLLM_RAY_EXTRA_ENV_VARS_TO_COPY", ""
-    ),
     # Use model_redirect to redirect the model name to a local folder.
     # `model_redirect` can be a json file mapping the model between
     # repo_id and local folder:
@@ -1748,17 +1718,7 @@ def compile_factors() -> dict[str, object]:
 
         factors[factor] = normalize_value(raw)
 
-    ray_noset_env_vars = [
-        # Refer to
-        # https://github.com/ray-project/ray/blob/c584b1ea97b00793d1def71eaf81537d70efba42/python/ray/_private/accelerators/nvidia_gpu.py#L11
-        # https://github.com/ray-project/ray/blob/c584b1ea97b00793d1def71eaf81537d70efba42/python/ray/_private/accelerators/amd_gpu.py#L11
-        # https://github.com/ray-project/ray/blob/b97d21dab233c2bd8ed7db749a82a1e594222b5c/python/ray/_private/accelerators/amd_gpu.py#L10
-        # https://github.com/ray-project/ray/blob/c584b1ea97b00793d1def71eaf81537d70efba42/python/ray/_private/accelerators/npu.py#L12
-        # https://github.com/ray-project/ray/blob/c584b1ea97b00793d1def71eaf81537d70efba42/python/ray/_private/accelerators/hpu.py#L12
-        # https://github.com/ray-project/ray/blob/c584b1ea97b00793d1def71eaf81537d70efba42/python/ray/_private/accelerators/neuron.py#L14
-        # https://github.com/ray-project/ray/blob/c584b1ea97b00793d1def71eaf81537d70efba42/python/ray/_private/accelerators/tpu.py#L38
-        # https://github.com/ray-project/ray/blob/c584b1ea97b00793d1def71eaf81537d70efba42/python/ray/_private/accelerators/intel_gpu.py#L10
-        # https://github.com/ray-project/ray/blob/c584b1ea97b00793d1def71eaf81537d70efba42/python/ray/_private/accelerators/rbln.py#L10
+    for var in [
         "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES",
         "RAY_EXPERIMENTAL_NOSET_ROCR_VISIBLE_DEVICES",
         "RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES",
@@ -1768,9 +1728,7 @@ def compile_factors() -> dict[str, object]:
         "RAY_EXPERIMENTAL_NOSET_TPU_VISIBLE_CHIPS",
         "RAY_EXPERIMENTAL_NOSET_ONEAPI_DEVICE_SELECTOR",
         "RAY_EXPERIMENTAL_NOSET_RBLN_RT_VISIBLE_DEVICES",
-    ]
-
-    for var in ray_noset_env_vars:
+    ]:
         factors[var] = normalize_value(os.getenv(var))
 
     return factors

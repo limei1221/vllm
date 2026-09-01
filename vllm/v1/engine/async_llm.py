@@ -20,7 +20,6 @@ from vllm.distributed.weight_transfer.base import (
 )
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.protocol import EngineClient, StreamingInput
-from vllm.entrypoints.serve.elastic_ep.middleware import set_scaling_elastic_ep
 from vllm.exceptions import VLLMClientError, VLLMValidationError
 from vllm.inputs import EngineInput, PromptType
 from vllm.logger import init_logger
@@ -106,7 +105,6 @@ class AsyncLLM(EngineClient):
         maybe_register_config_serialize_by_value()
 
         self.vllm_config = vllm_config
-        self._elastic_ep_lock = asyncio.Lock()
         self.model_config = vllm_config.model_config
         self.observability_config = vllm_config.observability_config
 
@@ -1004,62 +1002,6 @@ class AsyncLLM(EngineClient):
             f"Timeout reached after {drain_timeout} seconds "
             "waiting for requests to drain."
         )
-
-    async def _drain_requests_for_elastic_ep(self, drain_timeout: int) -> None:
-        try:
-            logger.info(
-                "VLLM_ELASTIC_EP_DRAIN_REQUESTS is set, "
-                "waiting for requests to drain before scaling"
-            )
-            await self.wait_for_requests_to_drain(drain_timeout)
-        except BaseException:
-            set_scaling_elastic_ep(False)
-            raise
-
-    async def scale_elastic_ep(
-        self, new_data_parallel_size: int, drain_timeout: int = 300
-    ):
-        """Scale the elastic EP data parallel size."""
-        async with self._elastic_ep_lock:
-            await self._scale_elastic_ep(new_data_parallel_size, drain_timeout)
-
-    async def _scale_elastic_ep(
-        self, new_data_parallel_size: int, drain_timeout: int
-    ) -> None:
-        old_data_parallel_size = self.vllm_config.parallel_config.data_parallel_size
-        if old_data_parallel_size == new_data_parallel_size:
-            logger.info(
-                "Data parallel size is already %s, skipping scale",
-                new_data_parallel_size,
-            )
-            return
-
-        await self.engine_core.prepare_elastic_ep(new_data_parallel_size)
-
-        # recreate stat loggers
-        if new_data_parallel_size > old_data_parallel_size and self.log_stats:
-            # TODO(rob): fix this after talking with Ray team.
-            # This resets all the prometheus metrics since we
-            # unregister during initialization. Need to understand
-            # the intended behavior here better.
-            self.logger_manager = StatLoggerManager(
-                vllm_config=self.vllm_config,
-                engine_idxs=list(range(new_data_parallel_size)),
-                custom_stat_loggers=None,
-            )
-            # Update the mutable ref so output_handler picks up the
-            # new logger without creating a circular reference via self.
-            if hasattr(self, "_logger_ref"):
-                self._logger_ref[0] = self.logger_manager
-            self.logger_manager.log_engine_initialized()
-
-        set_scaling_elastic_ep(True)
-        if envs.VLLM_ELASTIC_EP_DRAIN_REQUESTS:
-            await self._drain_requests_for_elastic_ep(drain_timeout)
-
-        await self.engine_core.commit_elastic_ep()
-        self.vllm_config.parallel_config.data_parallel_size = new_data_parallel_size
-        set_scaling_elastic_ep(False)
 
     async def handle_fault(
         self, fault_tolerance_request: FaultToleranceRequest

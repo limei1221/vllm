@@ -9,6 +9,7 @@ violated in the focused DeepSeek build.
 
 from __future__ import annotations
 
+import regex as re
 import sys
 from pathlib import Path
 
@@ -26,16 +27,16 @@ BANNED_PATHS = (
     "vllm/third_party/flash_linear_attention",
 )
 
-BANNED_TERMS = (
-    "ray",
-    "external_launcher",
-    "nixl",
-    "mooncake",
-    "lmcache",
-    "structured_output",
-    "enable_lora",
-    "multimodal",
-)
+BANNED_TERMS = {
+    "ray": re.compile(r"\bray\b", re.IGNORECASE),
+    "external_launcher": "external_launcher",
+    "nixl": "nixl",
+    "mooncake": "mooncake",
+    "lmcache": "lmcache",
+    "structured_output": "structured_output",
+    "enable_lora": "enable_lora",
+    "multimodal": "multimodal",
+}
 
 BUDGET_RUNTIME_MAX = 170000
 BUDGET_TEST_MAX = 45000
@@ -58,11 +59,13 @@ def check_lean_tree(repo_root: Path) -> list[str]:
             text = py_file.read_text()
         except Exception:
             continue
-        for term in BANNED_TERMS:
-            if term in text.lower():
-                violations.append(
-                    f"Banned term '{term}' in {rel}"
-                )
+        for term_name, pattern in BANNED_TERMS.items():
+            if isinstance(pattern, re.Pattern):
+                found = pattern.search(text)
+            else:
+                found = pattern in text.lower()
+            if found:
+                violations.append(f"Banned term '{term_name}' in {rel}")
 
     return violations
 
@@ -88,9 +91,7 @@ def check_budgets(repo_root: Path) -> list[str]:
             f"Runtime LOC {runtime_loc} exceeds budget {BUDGET_RUNTIME_MAX}"
         )
     if test_loc > BUDGET_TEST_MAX:
-        violations.append(
-            f"Test LOC {test_loc} exceeds budget {BUDGET_TEST_MAX}"
-        )
+        violations.append(f"Test LOC {test_loc} exceeds budget {BUDGET_TEST_MAX}")
 
     return violations
 

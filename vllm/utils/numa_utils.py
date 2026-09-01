@@ -227,11 +227,7 @@ def _get_gpu_index(
     parallel_config, local_rank: int, dp_local_rank: int | None = None
 ) -> int:
     """Compute the physical GPU index used for NUMA lookup."""
-    if (
-        parallel_config.distributed_executor_backend not in ("ray", "external_launcher")
-        and parallel_config.data_parallel_backend != "ray"
-        and parallel_config.nnodes_within_dp == 1
-    ):
+    if parallel_config.nnodes_within_dp == 1:
         if dp_local_rank is None:
             dp_local_rank = parallel_config.data_parallel_rank_local
             if dp_local_rank is None:
@@ -379,11 +375,7 @@ def _get_enginecore_numa_nodes(
         _get_numa_node(parallel_config, 0)
         numa_nodes = parallel_config.numa_bind_nodes
 
-    if (
-        parallel_config.distributed_executor_backend not in ("ray", "external_launcher")
-        and parallel_config.data_parallel_backend != "ray"
-        and parallel_config.nnodes_within_dp == 1
-    ):
+    if parallel_config.nnodes_within_dp == 1:
         if dp_local_rank is None:
             dp_local_rank = parallel_config.data_parallel_rank_local
             if dp_local_rank is None:

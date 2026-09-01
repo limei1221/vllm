@@ -20,22 +20,17 @@ from vllm.platforms import current_platform
 from vllm.utils.network_utils import get_open_ports_list
 
 if TYPE_CHECKING:
-    from ray.runtime_env import RuntimeEnv
-    from ray.util.placement_group import PlacementGroup
-
     from vllm.config.fault_tolerance import FaultToleranceConfig
     from vllm.v1.executor import Executor
 else:
-    RuntimeEnv = Any
-    PlacementGroup = Any
     Executor = Any
 
 logger = init_logger(__name__)
 _NUMACTL_CPUSET_PATTERN = re.compile(r"^\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*$")
 
 ExpertPlacementStrategy = Literal["linear", "round_robin"]
-DistributedExecutorBackend = Literal["ray", "mp", "uni", "external_launcher"]
-DataParallelBackend = Literal["ray", "mp"]
+DistributedExecutorBackend = Literal["mp", "uni"]
+DataParallelBackend = Literal["mp"]
 EPLBPolicyOption = Literal["default"]
 DCPCommBackend = Literal["ag_rs", "a2a"]
 EPLBCommunicatorBackend = Literal["torch_nccl", "torch_gloo", "nixl", "pynccl"]
@@ -145,7 +140,7 @@ class ParallelConfig:
     data_parallel_master_port: int = 29500
     """Port of the data parallel master."""
     data_parallel_backend: DataParallelBackend = "mp"
-    """Backend to use for data parallel, either "mp" or "ray"."""
+    """Backend to use for data parallel (multiprocessing only)."""
     data_parallel_external_lb: bool = False
     """Whether to use "external" DP LB mode. Applies only to online serving
     and when data_parallel_size > 0. This is useful for a "one-pod-per-rank"
@@ -231,29 +226,14 @@ class ParallelConfig:
     Defaults to True when async scheduling is enabled, False otherwise.
     """
 
-    ray_workers_use_nsight: bool = False
-    """Whether to profile Ray workers with nsight, see https://docs.ray.io/en/latest/ray-observability/user-guides/profiling.html#profiling-nsight-profiler."""
-
-    ray_runtime_env: RuntimeEnv | None = None
-    """Ray runtime environment to pass to distributed workers."""
-
-    placement_group: PlacementGroup | None = None
-    """ray distributed model workers placement group."""
-
     distributed_executor_backend: (
         str | DistributedExecutorBackend | type[Executor] | None
     ) = None
     """
-    Backend to use for distributed model workers, either "ray" or "mp"
-    (multiprocessing). If the product of pipeline_parallel_size and tensor_parallel_size
-    is less than or equal to the number of GPUs available, "mp" will be used to
-    keep processing on a single host. Otherwise, an error will be raised. To use "mp"
-    you must also set nnodes, and to use "ray" you must manually set
-    distributed_executor_backend to "ray".
-
-    Note:
-        [TPU](https://docs.vllm.ai/projects/tpu/en/latest/) platform only supports Ray
-        for distributed inference.
+    Backend to use for distributed model workers, either "mp"
+    (multiprocessing) or "uni". If the product of pipeline_parallel_size
+    and tensor_parallel_size is less than or equal to the number of GPUs
+    available, "mp" will be used to keep processing on a single host.
     """
 
     worker_cls: str = "auto"
@@ -843,13 +823,6 @@ class ParallelConfig:
             raise ValueError(
                 f"This focused build requires a single node, got nnodes={self.nnodes}."
             )
-        if self.distributed_executor_backend in ("external_launcher", "ray") or (
-            isinstance(self.distributed_executor_backend, type)
-            and getattr(self.distributed_executor_backend, "uses_ray", False)
-        ):
-            raise ValueError(
-                "This focused build does not support external launchers or Ray."
-            )
         if self.enable_elastic_ep:
             raise ValueError(
                 "This focused build does not support elastic expert parallelism."
@@ -874,10 +847,6 @@ class ParallelConfig:
             * self.tensor_parallel_size
             * self.prefill_context_parallel_size
         )
-
-        if self.distributed_executor_backend == "external_launcher":
-            logger.info("Using external launcher for distributed inference.")
-            self.world_size *= self.data_parallel_size
 
         if self.enable_elastic_ep:
             if not self.enable_eplb:
@@ -943,19 +912,10 @@ class ParallelConfig:
 
         self.data_parallel_index = self.data_parallel_rank
 
-        if self.distributed_executor_backend == "external_launcher":
-            os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
-            logger.info("Disabling V1 multiprocessing for external launcher.")
-
         if self.distributed_executor_backend is None and self.world_size_across_dp > 1:
-            # We use multiprocessing by default if world_size fits on the
-            # current node and we aren't in a ray placement group.
-
             backend: DistributedExecutorBackend = "mp"
             if current_platform.is_tpu() and envs.VLLM_XLA_USE_SPMD:
                 backend = "uni"
-            elif current_platform.is_cuda() and self.nnodes > 1:
-                backend = "mp"
             elif (
                 current_platform.is_cuda()
                 and current_platform.device_count() < self.world_size
@@ -963,10 +923,7 @@ class ParallelConfig:
                 gpu_count = current_platform.device_count()
                 raise ValueError(
                     f"World size ({self.world_size}) is larger than the number of "
-                    f"available GPUs ({gpu_count}) in this node. If this is "
-                    "intentional and you are using:\n"
-                    "- ray, set '--distributed-executor-backend ray'.\n"
-                    "- multiprocessing, set '--nnodes' appropriately."
+                    f"available GPUs ({gpu_count}) in this node."
                 )
             self.distributed_executor_backend = backend
             logger.debug("Defaulting to use %s for distributed inference", backend)
@@ -979,14 +936,14 @@ class ParallelConfig:
                 "max_parallel_loading_workers is currently "
                 "not supported and will be ignored."
             )
-        allowed_backends = ("mp", "uni", "external_launcher")
+        allowed_backends = ("mp", "uni")
         if (
             self.distributed_executor_backend not in allowed_backends
             and self.nnodes > 1
         ):
             raise ValueError(
                 "nnodes > 1 can only be set when distributed executor "
-                "backend is mp, uni or external_launcher."
+                "backend is mp or uni."
             )
 
         if self.enable_eplb and self.eplb_config.communicator is None:
@@ -1005,13 +962,6 @@ class ParallelConfig:
                 self.eplb_config.communicator = "pynccl"
             else:
                 self.eplb_config.communicator = "torch_gloo"
-
-    @property
-    def use_ray(self) -> bool:
-        return self.distributed_executor_backend == "ray" or (
-            isinstance(self.distributed_executor_backend, type)
-            and getattr(self.distributed_executor_backend, "uses_ray", False)
-        )
 
     @model_validator(mode="after")
     def _verify_args(self) -> Self:
@@ -1033,18 +983,14 @@ class ParallelConfig:
             raise ValueError(
                 "Unrecognized distributed executor backend "
                 f"{self.distributed_executor_backend}. Supported "
-                "values are 'ray', 'mp' 'uni', 'external_launcher', "
-                " custom Executor subclass or its import path."
+                "values are 'mp', 'uni', "
+                "custom Executor subclass or its import path."
             )
         if not current_platform.use_custom_allreduce():
             self.disable_custom_all_reduce = True
             logger.debug(
                 "Disabled the custom all-reduce kernel because it is not "
                 "supported on current platform."
-            )
-        if self.ray_workers_use_nsight and not self.use_ray:
-            raise ValueError(
-                "Unable to use nsight profiling unless workers run with Ray."
             )
 
         return self

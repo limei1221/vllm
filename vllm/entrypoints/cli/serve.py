@@ -293,14 +293,11 @@ def run_multi_api_server(args: argparse.Namespace):
 
     from vllm.v1.engine.utils import get_engine_zmq_addresses
 
-    # Defer port allocation to the child's bind() to avoid TOCTOU, except
-    # for Ray DP, which can't see the post-bind rebind (pickled-into-actor
-    # snapshot) and so pre-allocates driver-side.
-    is_ray_dp = parallel_config.data_parallel_backend == "ray"
+    # Defer port allocation to the child's bind() to avoid TOCTOU.
     addresses = get_engine_zmq_addresses(
         vllm_config,
         num_api_servers,
-        defer_api_server_ports=not is_ray_dp,
+        defer_api_server_ports=True,
     )
 
     with launch_core_engines(
@@ -325,13 +322,11 @@ def run_multi_api_server(args: argparse.Namespace):
             tensor_queue=engine_launch.tensor_queue,
         )
 
-        if not is_ray_dp:
-            # Forward each child's bound endpoints to the engine handshake
-            # (runs on ``with`` exit). Skipped for Ray DP, where addresses
-            # are pre-allocated above and Ray actors already hold them.
-            actual_inputs, actual_outputs = api_server_manager.gather_actual_addresses()
-            addresses.inputs = actual_inputs
-            addresses.outputs = actual_outputs
+        # Forward each child's bound endpoints to the engine handshake
+        # (runs on ``with`` exit).
+        actual_inputs, actual_outputs = api_server_manager.gather_actual_addresses()
+        addresses.inputs = actual_inputs
+        addresses.outputs = actual_outputs
 
         # Set frontend processes to watch during engine startup.
         # If any of these processes exit before the engines are up, the engine startup

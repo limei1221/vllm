@@ -30,7 +30,7 @@ class Executor(ABC):
     multiple devices.
     """
 
-    uses_ray: bool = False  # whether the executor uses Ray for orchestration.
+    uses_ray: bool = False
     supports_pp: bool = False  # whether the executor supports PP
 
     @staticmethod

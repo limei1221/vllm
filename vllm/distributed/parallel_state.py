@@ -1978,11 +1978,8 @@ def destroy_distributed_environment():
         torch.distributed.destroy_process_group()
 
 
-def cleanup_dist_env_and_memory(shutdown_ray: bool = False):
-    logger.debug(
-        "[shutdown] Distributed: cleanup start shutdown_ray=%s",
-        shutdown_ray,
-    )
+def cleanup_dist_env_and_memory():
+    logger.debug("[shutdown] Distributed: cleanup start")
     # Reset environment variable cache
     envs.disable_envs_cache()
 
@@ -2001,10 +1998,6 @@ def cleanup_dist_env_and_memory(shutdown_ray: bool = False):
 
     destroy_model_parallel()
     destroy_distributed_environment()
-    if shutdown_ray:
-        import ray  # Lazy import Ray
-
-        ray.shutdown()
     gc.collect()
     from vllm.platforms import current_platform
 

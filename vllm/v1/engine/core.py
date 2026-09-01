@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import gc
-import os
 import queue
 import signal
 import threading
@@ -73,7 +72,6 @@ from vllm.v1.engine.utils import (
     EngineHandshakeMetadata,
     EngineZmqAddresses,
     SignalCallback,
-    get_physical_gpu_ids_for_local_dp_rank,
 )
 from vllm.v1.executor import Executor
 from vllm.v1.fault_tolerance.engine_core_sentinel import (
@@ -2212,7 +2210,7 @@ class DPEngineCoreProc(EngineCoreProc):
         Send notifications to EngineCoreClient, which can then forward
         the notifications to other engine core processes. It is used for:
         1) In scale down: removing core engines to notify EngineCoreClient
-           so EngineCoreClient can release their ray placement groups;
+           so EngineCoreClient can release their references;
         2) Both scale up/down: to notify EngineCoreClient that existing
            core engines have already switched to the new parallel setup.
         """
@@ -2256,186 +2254,3 @@ class DPEngineCoreProc(EngineCoreProc):
         self.eep_scaling_state = state
         state.run_pre_kv_init_states()
         self.process_input_queue_block = False
-
-
-class EngineCoreActorMixin:
-    """
-    Ray actor for running EngineCore in a data parallel context
-    """
-
-    def __init__(
-        self,
-        vllm_config: VllmConfig,
-        addresses: EngineZmqAddresses,
-        dp_rank: int = 0,
-        local_dp_rank: int = 0,
-    ):
-        # Initialize tracer for distributed tracing if configured.
-        maybe_init_worker_tracer(
-            instrumenting_module_name="vllm.engine_core",
-            process_kind="engine_core",
-            process_name=f"DPEngineCoreActor_DP{dp_rank}",
-        )
-
-        self.addresses = addresses
-        vllm_config.parallel_config.data_parallel_index = dp_rank
-        vllm_config.parallel_config.data_parallel_rank_local = local_dp_rank
-
-        self._set_nixl_side_channel_host()
-
-        # Set CUDA_VISIBLE_DEVICES as early as possible in actor life cycle
-        # NOTE: in MP we set CUDA_VISIBLE_DEVICES at process creation time,
-        # and this cannot be done in the same way for Ray because:
-        # 1) Ray manages life cycle of all ray workers (including
-        # DPEngineCoreActor)
-        # 2) Ray sets CUDA_VISIBLE_DEVICES based on num_gpus configuration
-        # To bypass 2, we need to also set
-        # RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES, but vLLM workers created
-        # thereafter would have CUDA_VISIBLE_DEVICES set, which is sticky:
-        # https://github.com/ray-project/ray/blob/e752fc319ddedd9779a0989b6d3613909bad75c9/python/ray/_private/worker.py#L456 # noqa: E501
-        # This is problematic because when the vLLM worker (a Ray actor)
-        # executes a task, it indexes into the sticky CUDA_VISIBLE_DEVICES
-        # rather than directly using the GPU ID, potentially resulting in
-        # index out of bounds error. See:
-        # https://github.com/ray-project/ray/pull/40461/files#diff-31e8159767361e4bc259b6d9883d9c0d5e5db780fcea4a52ead4ee3ee4a59a78R1860 # noqa: E501
-        # and get_accelerator_ids_for_accelerator_resource() in worker.py
-        # of ray.
-        self._set_visible_devices(vllm_config, local_dp_rank)
-
-    @staticmethod
-    def _set_nixl_side_channel_host():
-        import ray
-
-        # The driver-side value is excluded from Ray actor env propagation.
-        # Fill in an actor-local default while preserving explicit overrides.
-        os.environ.setdefault(
-            "VLLM_NIXL_SIDE_CHANNEL_HOST", ray.util.get_node_ip_address()
-        )
-
-    def _set_visible_devices(self, vllm_config: VllmConfig, local_dp_rank: int):
-        from vllm.platforms import current_platform
-
-        if current_platform.is_xpu():
-            pass
-        else:
-            device_control_env_var = current_platform.device_control_env_var
-            self._set_assigned_physical_gpu_ids(
-                vllm_config, local_dp_rank, device_control_env_var
-            )
-
-    def _set_assigned_physical_gpu_ids(
-        self,
-        vllm_config: VllmConfig,
-        local_dp_rank: int,
-        device_control_env_var: str,
-    ):
-        world_size = vllm_config.parallel_config.world_size
-        try:
-            physical_gpu_ids = get_physical_gpu_ids_for_local_dp_rank(
-                device_control_env_var,
-                local_dp_rank,
-                world_size,
-                user_assigned_gpu_ids=(
-                    vllm_config.parallel_config.assigned_physical_gpu_ids
-                ),
-            )
-            vllm_config.parallel_config.assigned_physical_gpu_ids = physical_gpu_ids
-        except IndexError as e:
-            raise Exception(
-                f"Error computing assigned_physical_gpu_ids: "
-                f"local range: [{local_dp_rank * world_size}, "
-                f"{(local_dp_rank + 1) * world_size}) "
-                f'base value: "{os.getenv(device_control_env_var)}"'
-            ) from e
-
-    @contextmanager
-    def _perform_handshakes(
-        self,
-        handshake_address: str,
-        identity: bytes,
-        local_client: bool,
-        vllm_config: VllmConfig,
-        client_handshake_address: str | None,
-    ):
-        """
-        For Ray, we don't need to actually perform handshake.
-        All addresses information is known before the actor creation.
-        Therefore, we simply yield these addresses.
-        """
-        yield self.addresses
-
-    def wait_for_init(self):
-        """
-        Wait until the engine core is initialized.
-
-        This is just an empty method. When ray.get() on this method
-        (or any other method of the actor) returns, it is guaranteed
-        that actor creation (i.e., __init__) is complete.
-        """
-        pass
-
-    def run(self):
-        """
-        Run the engine core busy loop.
-        """
-        try:
-            self.run_busy_loop()  # type: ignore[attr-defined]
-        except SystemExit:
-            logger.debug("EngineCore exiting.")
-            raise
-        except Exception:
-            logger.exception("EngineCore encountered a fatal error.")
-            raise
-        finally:
-            self.shutdown()  # type: ignore[attr-defined]
-
-
-class DPMoEEngineCoreActor(EngineCoreActorMixin, DPEngineCoreProc):
-    """Used for MoE model data parallel cases."""
-
-    def __init__(
-        self,
-        vllm_config: VllmConfig,
-        local_client: bool,
-        addresses: EngineZmqAddresses,
-        executor_class: type[Executor],
-        log_stats: bool,
-        dp_rank: int = 0,
-        local_dp_rank: int = 0,
-    ):
-        vllm_config.parallel_config.data_parallel_rank = dp_rank
-
-        EngineCoreActorMixin.__init__(
-            self, vllm_config, addresses, dp_rank, local_dp_rank
-        )
-        DPEngineCoreProc.__init__(
-            self, vllm_config, local_client, "", executor_class, log_stats
-        )
-
-
-class EngineCoreActor(EngineCoreActorMixin, EngineCoreProc):
-    """Used for non-MoE and/or non-DP cases."""
-
-    def __init__(
-        self,
-        vllm_config: VllmConfig,
-        local_client: bool,
-        addresses: EngineZmqAddresses,
-        executor_class: type[Executor],
-        log_stats: bool,
-        dp_rank: int = 0,
-        local_dp_rank: int = 0,
-    ):
-        vllm_config.parallel_config.reconfigure_for_independent_dp_rank()
-        EngineCoreActorMixin.__init__(
-            self, vllm_config, addresses, dp_rank, local_dp_rank
-        )
-        EngineCoreProc.__init__(
-            self,
-            vllm_config,
-            local_client,
-            "",
-            executor_class,
-            log_stats,
-            engine_index=dp_rank,
-        )

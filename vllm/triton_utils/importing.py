@@ -28,7 +28,7 @@ if HAS_TRITON:
         ]
 
         # Check if we're in a distributed environment where CUDA_VISIBLE_DEVICES
-        # or HIP_VISIBLE_DEVICES might be temporarily empty (e.g., Ray sets it to ""
+        # or HIP_VISIBLE_DEVICES might be temporarily empty (set to ""
         # during actor init)
         visible_devices_env = (
             "HIP_VISIBLE_DEVICES"

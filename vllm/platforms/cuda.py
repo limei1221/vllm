@@ -208,12 +208,8 @@ class CudaPlatformBase(Platform):
     device_name: str = "cuda"
     device_type: str = "cuda"
     dispatch_key: str = "CUDA"
-    ray_device_key: str = "GPU"
     dist_backend: str = "nccl"
     device_control_env_var: str = "CUDA_VISIBLE_DEVICES"
-    ray_noset_device_env_vars: list[str] = [
-        "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES",
-    ]
 
     @classmethod
     def import_kernels(cls) -> None:

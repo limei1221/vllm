@@ -95,7 +95,6 @@ from vllm.config.utils import get_field
 from vllm.config.vllm import OptimizationLevel, PerformanceMode
 from vllm.logger import init_logger, suppress_logging
 from vllm.platforms import CpuArchEnum, current_platform
-from vllm.ray.lazy_utils import is_in_ray_actor, is_ray_initialized
 from vllm.transformers_utils.config import maybe_override_with_speculators
 from vllm.transformers_utils.repo_utils import get_model_path
 from vllm.transformers_utils.utils import is_cloud_storage
@@ -105,7 +104,6 @@ from vllm.utils.argparse_utils import (
     human_readable_int_or_auto,
 )
 from vllm.utils.mem_constants import GiB_bytes
-from vllm.utils.network_utils import get_ip
 from vllm.utils.torch_utils import resolve_kv_cache_dtype_string
 from vllm.v1.attention.backends.registry import AttentionBackendEnum
 from vllm.v1.sample.logits_processor import LogitsProcessor
@@ -550,7 +548,6 @@ class EngineArgs:
     io_processor_plugin: str | None = ModelConfig.io_processor_plugin
     renderer_num_workers: int = ModelConfig.renderer_num_workers
 
-    ray_workers_use_nsight: bool = ParallelConfig.ray_workers_use_nsight
     num_gpu_blocks_override: int | None = CacheConfig.num_gpu_blocks_override
     model_loader_extra_config: dict = get_field(LoadConfig, "model_loader_extra_config")
     ignore_patterns: str | list[str] = get_field(LoadConfig, "ignore_patterns")
@@ -976,7 +973,7 @@ class EngineArgs:
             '(e.g. --device-ids "2,3,5,7"). Avoids setting '
             "CUDA_VISIBLE_DEVICES, preserving full GPU topology "
             "visibility for GPU-NIC affinity and DeepGEMM. "
-            "Note: has no effect with Ray executors; use Ray "
+            "Note: has no effect; use "
             "placement groups for GPU selection instead.",
         )
         parallel_group.add_argument(
@@ -1046,7 +1043,7 @@ class EngineArgs:
             "-dpb",
             type=str,
             default="mp",
-            help='Backend for data parallel, either "mp" or "ray".',
+            help="Backend for data parallel (multiprocessing only).",
         )
         parallel_group.add_argument(
             "--data-parallel-hybrid-lb",
@@ -1109,9 +1106,6 @@ class EngineArgs:
         parallel_group.add_argument(
             "--max-parallel-loading-workers",
             **parallel_kwargs["max_parallel_loading_workers"],
-        )
-        parallel_group.add_argument(
-            "--ray-workers-use-nsight", **parallel_kwargs["ray_workers_use_nsight"]
         )
         parallel_group.add_argument(
             "--disable-custom-all-reduce",
@@ -1601,11 +1595,6 @@ class EngineArgs:
     def _resolve_device_ids(self) -> list[int] | None:
         if not self.device_ids:
             return None
-        if self.distributed_executor_backend == "ray":
-            logger.warning(
-                "--device-ids has no effect when using the Ray executor. "
-                "Use Ray placement groups for GPU selection instead."
-            )
         ids = self.device_ids
         if len(set(ids)) != len(ids):
             raise ValueError(f"--device-ids must not contain duplicates: {ids}")
@@ -1735,33 +1724,6 @@ class EngineArgs:
             kv_offloading_size=self.kv_offloading_size,
             kv_offloading_backend=self.kv_offloading_backend,
         )
-
-        ray_runtime_env = None
-        if is_ray_initialized():
-            # Ray Serve LLM calls `create_engine_config` in the context
-            # of a Ray task, therefore we check is_ray_initialized()
-            # as opposed to is_in_ray_actor().
-            import ray
-
-            ray_runtime_env = ray.get_runtime_context().runtime_env
-            # Avoid logging sensitive environment variables
-            sanitized_env = ray_runtime_env.to_dict() if ray_runtime_env else {}
-            if "env_vars" in sanitized_env:
-                sanitized_env["env_vars"] = {
-                    k: "***" for k in sanitized_env["env_vars"]
-                }
-            logger.info("Using ray runtime env (env vars redacted): %s", sanitized_env)
-
-        # Get the current placement group if Ray is initialized and
-        # we are in a Ray actor. If so, then the placement group will be
-        # passed to spawned processes.
-        placement_group = None
-        if is_in_ray_actor():
-            import ray
-
-            # This call initializes Ray automatically if it is not initialized,
-            # but we should not do this here.
-            placement_group = ray.util.get_current_placement_group()
 
         assert not headless or not self.data_parallel_hybrid_lb, (
             "data_parallel_hybrid_lb is not applicable in headless mode"
@@ -1902,33 +1864,15 @@ class EngineArgs:
                     "data-parallel ranks on this node."
                 )
 
-            if self.data_parallel_backend == "ray" and (
-                envs.VLLM_RAY_DP_PACK_STRATEGY == "span"
-            ):
-                # Data parallel size defaults to 1 if DP ranks are spanning
-                # multiple nodes
-                data_parallel_size_local = 1
-            else:
-                # Otherwise local DP size defaults to global DP size if not set
-                data_parallel_size_local = self.data_parallel_size
+            # Otherwise local DP size defaults to global DP size if not set
+            data_parallel_size_local = self.data_parallel_size
 
         # DP address, used in multi-node case for torch distributed group
         # and ZMQ sockets.
         if self.data_parallel_address is None:
-            if self.data_parallel_backend == "ray":
-                host_ip = get_ip()
-                logger.info(
-                    "Using host IP %s as ray-based data parallel address", host_ip
-                )
-                data_parallel_address = host_ip
-            else:
-                assert self.data_parallel_backend == "mp", (
-                    "data_parallel_backend can only be ray or mp, got %s",
-                    self.data_parallel_backend,
-                )
-                data_parallel_address = (
-                    self.master_addr or ParallelConfig.data_parallel_master_ip
-                )
+            data_parallel_address = (
+                self.master_addr or ParallelConfig.data_parallel_master_ip
+            )
         else:
             data_parallel_address = self.data_parallel_address
 
@@ -1977,9 +1921,6 @@ class EngineArgs:
             expert_placement_strategy=self.expert_placement_strategy,
             max_parallel_loading_workers=self.max_parallel_loading_workers,
             disable_custom_all_reduce=self.disable_custom_all_reduce,
-            ray_workers_use_nsight=self.ray_workers_use_nsight,
-            ray_runtime_env=ray_runtime_env,
-            placement_group=placement_group,
             distributed_executor_backend=self.distributed_executor_backend,
             worker_cls=self.worker_cls,
             worker_extension_cls=self.worker_extension_cls,
@@ -2214,16 +2155,11 @@ class EngineArgs:
             )
             if not supports_pp and self.distributed_executor_backend not in (
                 ParallelConfig.distributed_executor_backend,
-                "ray",
                 "mp",
-                "external_launcher",
             ):
-                name = (
-                    "Pipeline Parallelism without Ray distributed "
-                    "executor or multiprocessing executor or external "
-                    "launcher"
+                _raise_unsupported_error(
+                    feature_name="Pipeline Parallelism without multiprocessing executor"
                 )
-                _raise_unsupported_error(feature_name=name)
 
     @classmethod
     def get_batch_defaults(
@@ -2242,7 +2178,7 @@ class EngineArgs:
         # Try to query the device name on the current platform. If it fails,
         # it may be because the platform that imports vLLM is not the same
         # as the platform that vLLM is running on (e.g. the case of scaling
-        # vLLM with Ray) and has no GPUs. In this case we use the default
+        # vLLM) and has no GPUs. In this case we use the default
         # values for non-H100/H200 GPUs.
         try:
             device_memory = current_platform.get_device_total_memory()

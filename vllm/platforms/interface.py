@@ -141,21 +141,9 @@ class Platform:
     # use "CPU" as a fallback for platforms not registered in PyTorch
     dispatch_key: str = "CPU"
 
-    # available ray device keys:
-    # https://github.com/ray-project/ray/blob/10ba5adadcc49c60af2c358a33bb943fb491a171/python/ray/_private/ray_constants.py#L438 # noqa
-    # empty string means the device does not support ray
-    ray_device_key: str = ""
-
     # platform-agnostic way to specify the device control environment variable,
     # .e.g. CUDA_VISIBLE_DEVICES for CUDA.
-    # hint: search for "get_visible_accelerator_ids_env_var" in
-    # https://github.com/ray-project/ray/tree/master/python/ray/_private/accelerators # noqa
     device_control_env_var: str = "VLLM_DEVICE_CONTROL_ENV_VAR_PLACEHOLDER"
-
-    # environment variables that need to be set to 1 to prevent ray from
-    # setting the visible devices e.g.
-    # RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES
-    ray_noset_device_env_vars: list[str] = []
 
     # The torch.compile backend for compiling simple and
     # standalone functions. The default value is "inductor" to keep
@@ -299,7 +287,7 @@ class Platform:
                 )
             return _assigned_physical_gpu_ids[device_id]
         # Treat empty device control env var as unset. This is a valid
-        # configuration in Ray setups where the engine is launched in
+        # configuration where the engine is launched in
         # a CPU-only placement group located on a GPU node.
         if (
             cls.device_control_env_var in os.environ

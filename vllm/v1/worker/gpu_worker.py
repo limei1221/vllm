@@ -310,15 +310,8 @@ class Worker(WorkerBase):
     @instrument(span_name="Init device")
     def init_device(self):
         if self.device_config.device_type == "cuda":
-            # This env var set by Ray causes exceptions with graph building.
-            os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
             parallel_config = self.parallel_config
-            if (
-                parallel_config.distributed_executor_backend
-                not in ("ray", "external_launcher")
-                and parallel_config.data_parallel_backend != "ray"
-                and parallel_config.nnodes_within_dp == 1
-            ):
+            if parallel_config.nnodes_within_dp == 1:
                 # Use local DP rank if available, otherwise use global DP rank.
                 dp_local_rank = self.parallel_config.data_parallel_rank_local
                 if dp_local_rank is None:
@@ -343,25 +336,13 @@ class Worker(WorkerBase):
                     f"local_rank {self.local_rank} is out of bounds for "
                     f"assigned_physical_gpu_ids {assigned_physical_gpu_ids}"
                 )
-                # NOTE(patch pr45026): local_world_size is derived from
-                # parallel_config.nnodes, which is only set for the "mp"
-                # multi-node backend. With the "ray"/"external_launcher"
-                # backends nnodes stays 1, so local_world_size collapses to
-                # the full world_size and this check wrongly fires on
-                # cross-node deployments. assigned_physical_gpu_ids is already
-                # per-node and the local_rank bound above fully validates the
-                # mapping for these backends, so skip the check for them.
-                if parallel_config.distributed_executor_backend not in (
-                    "ray",
-                    "external_launcher",
-                ):
-                    assert self.parallel_config.local_world_size <= len(
-                        assigned_physical_gpu_ids
-                    ), (
-                        f"local_world_size ({self.parallel_config.local_world_size})"
-                        " exceeds assigned_physical_gpu_ids count "
-                        f"({len(assigned_physical_gpu_ids)})"
-                    )
+                assert self.parallel_config.local_world_size <= len(
+                    assigned_physical_gpu_ids
+                ), (
+                    f"local_world_size ({self.parallel_config.local_world_size})"
+                    " exceeds assigned_physical_gpu_ids count "
+                    f"({len(assigned_physical_gpu_ids)})"
+                )
             else:
                 assert self.local_rank < torch.accelerator.device_count(), (
                     f"DP adjusted local rank {self.local_rank} is out of "

@@ -212,12 +212,6 @@ class EngineClient(ABC):
         """Shutdown the engine with optional timeout."""
         ...
 
-    async def scale_elastic_ep(
-        self, new_data_parallel_size: int, drain_timeout: int = 300
-    ) -> None:
-        """Scale the engine"""
-        raise NotImplementedError
-
     async def collective_rpc(
         self,
         method: str,
