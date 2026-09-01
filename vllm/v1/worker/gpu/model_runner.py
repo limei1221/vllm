@@ -659,15 +659,6 @@ class GPUModelRunner:
             assert self.sampler is not None
             self.step_timing.drafter_start()
             mm_inputs: tuple[list[torch.Tensor], torch.Tensor] | None = None
-            if self.speculator.supports_mm_inputs:
-                mm_inputs = (
-                    [],
-                    torch.zeros(
-                        input_batch.num_tokens,
-                        dtype=torch.bool,
-                        device="cpu",
-                    ),
-                )
 
             # Let the target override the hidden state fed to the drafter
             # (e.g. DeepSeek V4 MTP needs the pre-hc_head residual). The
@@ -745,12 +736,10 @@ class GPUModelRunner:
         self.block_tables.init_block_table_layout_tensors()
 
     def reset_mm_cache(self) -> None:
-        if self.encoder_cache is not None:
-            self.encoder_cache.reset_mm_cache()
+        pass
 
     def reset_encoder_cache(self) -> None:
-        if self.encoder_cache is not None:
-            self.encoder_cache.reset_encoder_cache()
+        pass
 
     def profile_cudagraph_memory(self) -> int:
         # NOTE(woosuk): It is TBD whether we keep this API or not.
@@ -762,10 +751,7 @@ class GPUModelRunner:
             return 0
 
         assert self.cudagraph_manager is not None
-        capture_encoder = (
-            self.model_state.supports_mm_inputs
-            and self.model_state.encoder_runner.has_cudagraph()
-        )
+        capture_encoder = False
         capture_decoder = self.cudagraph_manager.needs_capture()
         if not capture_encoder and not capture_decoder:
             logger.warning(
@@ -783,9 +769,6 @@ class GPUModelRunner:
         start_free_gpu_memory = torch.accelerator.get_memory_info()[0]
 
         with nullcontext():
-            if capture_encoder:
-                self.model_state.encoder_runner.capture()
-
             if capture_decoder:
                 self.cudagraph_manager.capture(
                     self.model,
@@ -831,8 +814,6 @@ class GPUModelRunner:
             return False
         if self.pp_handler is not None:
             self.pp_handler.on_req_idx_freed(req_idx)
-        if self.encoder_cache is not None:
-            self.encoder_cache.remove_request(req_id)
         if self.prompt_logprobs_worker is not None:
             self.prompt_logprobs_worker.remove_request(req_id)
         return True
@@ -846,9 +827,7 @@ class GPUModelRunner:
             self._remove_request(req_id)
 
     def free_states(self, scheduler_output: SchedulerOutput) -> None:
-        if self.encoder_cache is not None:
-            for mm_hash in scheduler_output.free_encoder_mm_hashes:
-                self.encoder_cache.free_encoder_cache(mm_hash)
+        pass
 
     def update_pp_decode_requests(self):
         # For non-last PP ranks, update decode requests with sampler output from
@@ -1428,32 +1407,6 @@ class GPUModelRunner:
         input_ids = input_batch.input_ids
         inputs_embeds = None
         ec_connector_output = None
-        if self.supports_mm_inputs and self.is_first_pp_rank:
-            # Run MM encoder (if needed) and get multimodal embeddings.
-            # Only first PP rank prepares multimodal embeddings.
-            if dummy_run:
-                # Obtain mm embeddings of correct shape for compiled model.
-                inputs_embeds = self.model_state.dummy_inputs_embeds(
-                    input_batch.num_tokens_after_padding
-                )
-            else:
-                scheduled_encoder_inputs = scheduler_output.scheduled_encoder_inputs
-                with self.ec_connector.maybe_get_output(
-                    scheduler_output
-                ) as ec_connector_output:
-                    if self.is_encoder_only:
-                        # Encode and publish, nothing else: this instance runs no
-                        # language model, so the gather inside get_mm_embeddings
-                        # would build an inputs_embeds nobody reads -- and it
-                        # raises "Encoder cache miss" for any scheduled item this
-                        # instance did not encode, taking the engine down with it.
-                        self.model_state.execute_mm_encoder(scheduled_encoder_inputs)
-                    else:
-                        inputs_embeds = self.model_state.get_mm_embeddings(
-                            scheduled_encoder_inputs, input_batch, self.req_states
-                        )
-            if inputs_embeds is not None and not self.model.requires_raw_input_tokens:
-                input_ids = None
 
         if self.is_encoder_only:
             return ModelRunnerOutput.with_ec_conn_output(
@@ -1661,16 +1614,6 @@ class GPUModelRunner:
         )
 
         mm_inputs: tuple[list[torch.Tensor], torch.Tensor] | None = None
-        if self.speculator is not None and self.speculator.supports_mm_inputs:
-            # Get cached multimodal embeddings for draft forward.
-            # NOTE: This is done here because postprocess updates
-            # num_computed_prefill_tokens.
-            # The EAGLE/MTP drafter reads one position ahead of the target.
-            # TODO(TheEpicDolphin): Gather MM embeddings for all speculative
-            # steps during multi-module MTP.
-            mm_inputs = self.model_state.gather_mm_embeddings(
-                input_batch, draft_lookahead=1
-            )
 
         # Postprocess results and update request states.
         # NOTE: This is intentionally done after creating the AsyncOutput,
@@ -1753,8 +1696,6 @@ class GPUModelRunner:
             self.attn_groups.clear()
         if hasattr(self, "kv_cache_config"):
             del self.kv_cache_config
-        if hasattr(self, "model_state") and self.model_state.supports_mm_inputs:
-            self.model_state.encoder_runner.clear()
         free_before_shutdown(self.vllm_config)
         if hasattr(self, "model_state"):
             del self.model_state

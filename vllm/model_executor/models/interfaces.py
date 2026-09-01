@@ -10,7 +10,6 @@ from collections.abc import (
     Sequence,
 )
 from contextlib import ExitStack, contextmanager, nullcontext
-from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -39,9 +38,8 @@ if TYPE_CHECKING:
         ModelConfig,
         VllmConfig,
     )
-    from vllm.inputs import PromptType, TokensPrompt
+    from vllm.inputs import PromptType
     from vllm.model_executor.layers.fused_moe import MoERunner
-    from vllm.model_executor.layers.mamba.mamba_utils import MambaStateCopyFunc
     from vllm.model_executor.models.interfaces_base import VllmModel
     from vllm.model_executor.models.utils import WeightsMapper
 
@@ -49,7 +47,6 @@ if TYPE_CHECKING:
     MultiModalKwargsItem: TypeAlias = Any
     _ProcessorFactories: TypeAlias = Any
     from vllm.sequence import IntermediateTensors
-    from vllm.tasks import ScoreType
     from vllm.v1.worker.encoder_cudagraph_defs import (
         EncoderCudaGraphCaptureInputs,
         EncoderCudaGraphConfig,
@@ -67,30 +64,6 @@ The output embeddings must be one of the following formats:
     each input multimodal data item (e.g, image).
 - A single 3D tensor, with the batch dimension grouping the 2D tensors.
 """
-
-MambaStateShapes: TypeAlias = (
-    tuple[tuple[int, int]]
-    | tuple[tuple[int, int, int]]
-    | tuple[tuple[int, int], tuple[int, int]]
-    | tuple[tuple[int, int], tuple[int, int, int]]
-)
-
-
-@dataclass(frozen=True, slots=True)
-class DiarizedTranscriptionSegment:
-    """A timestamped, speaker-attributed segment produced by an ASR model."""
-
-    start: float
-    end: float
-    speaker: str
-    text: str
-
-
-class StreamingTranscriptionPostProcessor:
-    """Stateful streaming post-processor for transcription deltas."""
-
-    def process_delta(self, text_delta: str, finished: bool) -> str:
-        return text_delta
 
 
 def _require_is_multimodal(is_multimodal: Tensor | None) -> Tensor:
@@ -475,51 +448,6 @@ class SupportsMultiModal(SupportsMultiModalEmbeddings, Protocol):
         )
 
 
-@runtime_checkable
-class SupportsMultiModalPruning(Protocol):
-    """The interface required for models that support returning both input
-    embeddings and positions. Model may require custom positions for dynamic
-    pruning of multimodal embeddings.
-    """
-
-    supports_multimodal_pruning: ClassVar[Literal[True]] = True
-
-    supported_video_pruning_methods: ClassVar[tuple[str, ...]] = ("evs",)
-    """Video pruning methods (as reported by
-    `MultiModalConfig.get_video_pruning_spec`) implemented by this model.
-    Models supporting methods beyond EVS should override this."""
-
-    def recompute_mrope_positions(
-        self,
-        input_ids: list[int] | torch.Tensor,
-        multimodal_embeddings: Sequence[torch.Tensor],
-        mrope_positions: torch.LongTensor,
-        num_computed_tokens: int,
-    ) -> tuple[Sequence[torch.Tensor], Tensor, int]:
-        """
-        Update part of input mrope positions (starting with
-        num_computed_tokens index). Original mrope_positions are computed
-        for unpruned sequence and becomes incorrect once pruning occurs,
-        so once we prune media tokens we should reflect this in the
-        mrope_positions before we feed it to LLM.
-
-        Args:
-            input_ids: (N,) All input tokens of the prompt containing
-                entire sequence. Either a host-side list or an already
-                device-resident tensor.
-            multimodal_embeddings: Sequence of multimodal embeddings that
-                fits into the prefill chunk that is being processed.
-            mrope_positions: Existing mrope positions (3, N) for entire
-                sequence
-            num_computed_tokens: A number of computed tokens so far.
-
-        Returns:
-            Tuple of (multimodal_embeddings, mrope_positions,
-                mrope_position_delta).
-        """
-        ...
-
-
 @overload
 def supports_multimodal(model: type[object]) -> TypeIs[type[SupportsMultiModal]]: ...
 
@@ -562,66 +490,6 @@ def requires_raw_input_tokens(model: type[object] | object) -> bool:
 
 def supports_multimodal_encoder_tp_data(model: type[object] | object) -> bool:
     return getattr(model, "supports_encoder_tp_data", False)
-
-
-@overload
-def supports_multimodal_pruning(
-    model: type[object],
-) -> TypeIs[type[SupportsMultiModalPruning]]: ...
-
-
-@overload
-def supports_multimodal_pruning(model: object) -> TypeIs[SupportsMultiModalPruning]: ...
-
-
-def supports_multimodal_pruning(
-    model: type[object] | object,
-) -> TypeIs[type[SupportsMultiModalPruning]] | TypeIs[SupportsMultiModalPruning]:
-    return getattr(model, "supports_multimodal_pruning", False)
-
-
-@runtime_checkable
-class SupportsScoreTemplate(Protocol):
-    """The interface required for all models that support score template."""
-
-    supports_score_template: ClassVar[Literal[True]] = True
-    """
-    A flag that indicates this model supports score template.
-
-    Note:
-        There is no need to redefine this flag if this class is in the
-        MRO of your model class.
-    """
-
-    @classmethod
-    def get_score_template(cls, query: str, document: str) -> str | None:
-        """
-        Generate a full prompt by populating the score template with query and document content.
-        """  # noqa: E501
-        ...
-
-    @classmethod
-    def post_process_tokens(cls, prompt: "TokensPrompt") -> None:
-        """
-        Perform architecture-specific manipulations on the input tokens.
-        """
-        ...
-
-
-@overload
-def supports_score_template(
-    model: type[object],
-) -> TypeIs[type[SupportsScoreTemplate]]: ...
-
-
-@overload
-def supports_score_template(model: object) -> TypeIs[SupportsScoreTemplate]: ...
-
-
-def supports_score_template(
-    model: type[object] | object,
-) -> TypeIs[type[SupportsScoreTemplate]] | TypeIs[SupportsScoreTemplate]:
-    return getattr(model, "supports_score_template", False)
 
 
 # We can't use runtime_checkable with ClassVar for issubclass checks
@@ -771,88 +639,6 @@ def has_inner_state(
 
 
 @runtime_checkable
-class IsAttentionFree(Protocol):
-    """The interface required for all models like Mamba that lack attention,
-    but do have state whose size is constant wrt the number of tokens."""
-
-    is_attention_free: ClassVar[Literal[True]] = True
-    """
-        A flag that indicates this model has no attention.
-        Used for block manager and attention backend selection.
-        True for Mamba but not Jamba.
-    """
-
-
-@overload
-def is_attention_free(model: object) -> TypeIs[IsAttentionFree]: ...
-
-
-@overload
-def is_attention_free(model: type[object]) -> TypeIs[type[IsAttentionFree]]: ...
-
-
-def is_attention_free(
-    model: type[object] | object,
-) -> TypeIs[type[IsAttentionFree]] | TypeIs[IsAttentionFree]:
-    return getattr(model, "is_attention_free", False)
-
-
-@runtime_checkable
-class IsHybrid(Protocol):
-    """The interface required for all models like Jamba that have both
-    attention and mamba blocks, indicates that
-    hf_config has 'layers_block_type'"""
-
-    is_hybrid: ClassVar[Literal[True]] = True
-    """
-        A flag that indicates this model has both mamba and attention blocks
-        , also indicates that the model's hf_config has 
-        'layers_block_type' """
-
-    @classmethod
-    def get_mamba_state_shape_from_config(
-        cls,
-        vllm_config: "VllmConfig",
-    ) -> MambaStateShapes:
-        """Calculate shapes for Mamba's convolutional and state caches.
-
-        Args:
-            vllm_config: vLLM config
-
-        Returns:
-            Shapes for each state cache used by the model.
-        """
-        ...
-
-    @classmethod
-    def get_mamba_state_copy_func(cls) -> tuple["MambaStateCopyFunc", ...]:
-        """Calculate copy-function callables for each Mamba state.
-
-        Returns:
-            A tuple of MambaStateCopyFunc callables that correspond, in order,
-            to the Mamba states produced by the model. Each callable accepts
-            (state, block_ids, cur_block_idx, num_accepted_tokens) and returns
-            a MambaCopySpec describing the memory-copy parameters for prefix
-            caching in align mode.
-        """
-        ...
-
-
-@overload
-def is_hybrid(model: object) -> TypeIs[IsHybrid]: ...
-
-
-@overload
-def is_hybrid(model: type[object]) -> TypeIs[type[IsHybrid]]: ...
-
-
-def is_hybrid(
-    model: type[object] | object,
-) -> TypeIs[type[IsHybrid]] | TypeIs[IsHybrid]:
-    return getattr(model, "is_hybrid", False)
-
-
-@runtime_checkable
 class MixtureOfExperts(Protocol):
     """
     Check if the model is a mixture of experts (MoE) model.
@@ -968,97 +754,6 @@ def is_mixture_of_experts(model: object) -> TypeIs[MixtureOfExperts]:
     return (
         isinstance(model, MixtureOfExperts) and getattr(model, "num_moe_layers", 0) > 0
     )
-
-
-@runtime_checkable
-class HasNoOps(Protocol):
-    has_noops: ClassVar[Literal[True]] = True
-
-
-@overload
-def has_noops(model: object) -> TypeIs[HasNoOps]: ...
-
-
-@overload
-def has_noops(model: type[object]) -> TypeIs[type[HasNoOps]]: ...
-
-
-def has_noops(
-    model: type[object] | object,
-) -> TypeIs[type[HasNoOps]] | TypeIs[HasNoOps]:
-    return getattr(model, "has_noops", False)
-
-
-@runtime_checkable
-class SupportsMambaPrefixCaching(Protocol):
-    """The interface for models whose mamba layers support prefix caching.
-
-    This is currently experimental.
-    """
-
-    supports_mamba_prefix_caching: ClassVar[Literal[True]] = True
-
-
-@overload
-def supports_mamba_prefix_caching(
-    model: object,
-) -> TypeIs[SupportsMambaPrefixCaching]: ...
-
-
-@overload
-def supports_mamba_prefix_caching(
-    model: type[object],
-) -> TypeIs[type[SupportsMambaPrefixCaching]]: ...
-
-
-def supports_mamba_prefix_caching(
-    model: type[object] | object,
-) -> TypeIs[type[SupportsMambaPrefixCaching]] | TypeIs[SupportsMambaPrefixCaching]:
-    return getattr(model, "supports_mamba_prefix_caching", False)
-
-
-@runtime_checkable
-class SupportsReplaySSM(Protocol):
-    """The interface for models whose Mamba2 layers support ReplaySSM cached
-    standard decode.
-
-    This is currently experimental.
-    """
-
-    supports_replayssm: ClassVar[Literal[True]] = True
-
-
-@overload
-def supports_replayssm(model: object) -> TypeIs[SupportsReplaySSM]: ...
-
-
-@overload
-def supports_replayssm(model: type[object]) -> TypeIs[type[SupportsReplaySSM]]: ...
-
-
-def supports_replayssm(
-    model: type[object] | object,
-) -> TypeIs[type[SupportsReplaySSM]] | TypeIs[SupportsReplaySSM]:
-    return getattr(model, "supports_replayssm", False)
-
-
-@runtime_checkable
-class SupportsCrossEncoding(Protocol):
-    """The interface required for all models that support cross encoding."""
-
-    score_type: ClassVar["ScoreType"] = "cross-encoder"
-
-
-@runtime_checkable
-class SupportsLateInteraction(Protocol):
-    """The interface required for all models that support late interaction.
-
-    Late interaction models (like ColBERT) encode queries and documents
-    separately into per-token embeddings, then compute similarity via
-    MaxSim (max over document tokens, sum over query tokens).
-    """
-
-    score_type: ClassVar["ScoreType"] = "late-interaction"
 
 
 class SupportsQuant:
@@ -1267,7 +962,7 @@ class SupportsTranscription(Protocol):
         return text
 
     @classmethod
-    def parse_diarized_transcript(cls, text: str) -> list[DiarizedTranscriptionSegment]:
+    def parse_diarized_transcript(cls, text: str) -> list[Any]:
         """Parse the model-specific diarized transcript format.
 
         Only models that set ``supports_diarized_transcription`` must override
@@ -1278,7 +973,7 @@ class SupportsTranscription(Protocol):
     @classmethod
     def get_streaming_post_processor_cls(
         cls,
-    ) -> type[StreamingTranscriptionPostProcessor]:
+    ) -> type[Any]:
         """
         Return a stateful post-processor class for streaming output deltas.
 
@@ -1286,7 +981,7 @@ class SupportsTranscription(Protocol):
         request output is final. It returns the cleaned delta that should be
         sent to the client.
         """
-        return StreamingTranscriptionPostProcessor
+        raise NotImplementedError
 
     @classmethod
     def get_language_detection_prompt(
