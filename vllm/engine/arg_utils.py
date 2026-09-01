@@ -2496,10 +2496,7 @@ class EngineArgs:
             attention_config=attention_config,
             mamba_config=mamba_config,
             kernel_config=kernel_config,
-            lora_config=lora_config,
             speculative_config=speculative_config,
-            diffusion_config=diffusion_config,
-            structured_outputs_config=self.structured_outputs_config,
             observability_config=observability_config,
             compilation_config=compilation_config,
             kv_transfer_config=self.kv_transfer_config,
@@ -2519,6 +2516,8 @@ class EngineArgs:
 
     def _check_feature_supported(self):
         """Raise an error if the feature is not supported."""
+        if self.enable_lora:
+            _raise_unsupported_error(feature_name="LoRA")
         if self.pipeline_parallel_size > 1:
             supports_pp = getattr(
                 self.distributed_executor_backend, "supports_pp", False

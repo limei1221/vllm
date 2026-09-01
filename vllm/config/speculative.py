@@ -67,15 +67,9 @@ EagleModelTypes = Literal[
     "eagle", "eagle3", "extract_hidden_states", MTPModelTypes, DFlashModelTypes
 ]
 SpeculativeMethod = Literal[
-    "ngram",
-    "medusa",
-    "mlp_speculator",
-    "draft_model",
-    "suffix",
-    "custom_class",
-    EagleModelTypes,
-    NgramGPUTypes,
-    DSparkModelTypes,
+    "mtp",
+    "eagle",
+    "eagle3",
 ]
 RejectionSampleMethod = Literal["standard", "synthetic", "block"]
 DraftSampleMethod = Literal["greedy", "probabilistic"]
@@ -688,30 +682,21 @@ class SpeculativeConfig:
         return len(parts) >= 2 and all(part.isidentifier() for part in parts)
 
     def __post_init__(self):
-        # Note: "method" is a new parameter that helps to extend the
-        # configuration of non-model-based proposers, and the "model" parameter
-        # will be used to set the draft model, eagle head, or additional weight
-        # when needed. If users do not specify "method", the speculative method
-        # will be detected automatically if possible. If the speculative method
-        # can not be detected, it will be considered as the "draft_model" by
-        # default.
-
-        # infer method from user args
-        if self.method is None and SpeculativeConfig._is_custom_proposer_path(
-            self.model
-        ):
-            self.method = "custom_class"
-        elif self.method is None:
-            if self.model in ("ngram", "[ngram]"):
-                self.method = "ngram"
-            else:
-                self.method = "draft_model"
-
-        if self.method in get_args(MTPModelTypes) and self.method != "mtp":
-            logger.warning(
-                "method `%s` is deprecated and replaced with mtp.", self.method
+        if self.method is not None and self.method not in ("mtp", "eagle", "eagle3"):
+            raise ValueError(
+                f"This focused build only supports MTP or EAGLE speculative "
+                f"methods, got {self.method!r}."
             )
-            self.method = "mtp"
+
+        if self.method is None and self.model is None:
+            return
+
+        if self.method is None:
+            self.method = "draft_model"
+            raise ValueError(
+                f"This focused build only supports MTP or EAGLE speculative "
+                f"methods, got {self.method!r}."
+            )
 
         if self.model is None and self.num_speculative_tokens is not None:
             if self.method == "mtp":

@@ -31,14 +31,12 @@ from .attention import AttentionConfig
 from .cache import CacheConfig
 from .compilation import CompilationConfig, CompilationMode, CUDAGraphMode
 from .device import DeviceConfig
-from .diffusion import DiffusionConfig
 from .ec_manager_config import EncoderCacheManagerConfig
 from .ec_transfer import ECTransferConfig
 from .kernel import KernelConfig
 from .kv_events import KVEventsConfig
 from .kv_transfer import KVTransferConfig
 from .load import LoadConfig
-from .lora import LoRAConfig
 from .mamba import MambaBackendEnum, MambaConfig
 from .model import ModelConfig
 from .observability import ObservabilityConfig
@@ -48,7 +46,6 @@ from .profiler import ProfilerConfig
 from .reasoning import ReasoningConfig
 from .scheduler import SchedulerConfig
 from .speculative import EagleModelTypes, NgramGPUTypes, SpeculativeConfig
-from .structured_outputs import StructuredOutputsConfig
 from .utils import SupportsHash, config, replace
 from .weight_transfer import WeightTransferConfig
 
@@ -349,17 +346,8 @@ class VllmConfig:
     """Mamba configuration."""
     kernel_config: KernelConfig = Field(default_factory=KernelConfig)
     """Kernel configuration."""
-    lora_config: LoRAConfig | None = None
-    """LoRA configuration."""
     speculative_config: SpeculativeConfig | None = None
     """Speculative decoding configuration."""
-    diffusion_config: DiffusionConfig | None = None
-    """Diffusion LLM (dLLM) configuration."""
-
-    structured_outputs_config: StructuredOutputsConfig = Field(
-        default_factory=StructuredOutputsConfig
-    )
-    """Structured outputs configuration."""
     observability_config: ObservabilityConfig = Field(
         default_factory=ObservabilityConfig
     )
@@ -477,16 +465,10 @@ class VllmConfig:
             vllm_factors.append(self.attention_config.compute_hash())
         else:
             vllm_factors.append("None")
-        if self.lora_config:
-            vllm_factors.append(self.lora_config.compute_hash())
-        else:
-            vllm_factors.append("None")
         if self.speculative_config:
             vllm_factors.append(self.speculative_config.compute_hash())
         else:
             vllm_factors.append("None")
-        if self.structured_outputs_config:
-            vllm_factors.append(self.structured_outputs_config.compute_hash())
         if self.profiler_config:
             vllm_factors.append(self.profiler_config.compute_hash())
         else:
@@ -577,11 +559,6 @@ class VllmConfig:
             and self.speculative_config.num_speculative_tokens is not None
         ):
             return self.speculative_config.num_speculative_tokens
-        if (
-            self.diffusion_config is not None
-            and self.diffusion_config.canvas_length is not None
-        ):
-            return self.diffusion_config.canvas_length
         return 0
 
     @property
@@ -1099,9 +1076,6 @@ class VllmConfig:
                 )
 
         self._verify_sampling_replay_config()
-
-        if self.lora_config is not None:
-            self.lora_config.verify_with_model_config(self.model_config)
 
         if (
             self.mamba_config.enable_stochastic_rounding
@@ -2260,7 +2234,6 @@ class VllmConfig:
             f"enable_return_routed_experts={self.model_config.enable_return_routed_experts}, "  # noqa
             f"kv_cache_dtype={self.cache_config.cache_dtype}, "
             f"device_config={self.device_config.device}, "
-            f"structured_outputs_config={self.structured_outputs_config!r}, "
             f"observability_config={self.observability_config!r}, "
             f"seed={self.model_config.seed}, "
             f"served_model_name={self.model_config.served_model_name}, "
@@ -2420,14 +2393,6 @@ class VllmConfig:
                 and self.parallel_config.pipeline_parallel_size > 1
             ):
                 unsupported.append("EAGLE3 with pipeline parallelism")
-
-            if (
-                speculative_config.enable_adaptive_verification
-                and self.lora_config is not None
-            ):
-                # The per-token LoRA mapping is built from CPU placeholder boundaries,
-                # while the trimmed batch's true boundaries are decided on the GPU.
-                unsupported.append("adaptive verification with LoRA")
 
             if (
                 speculative_config.enable_adaptive_verification
