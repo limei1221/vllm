@@ -17,8 +17,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-set(CMAKE_HIP_STANDARD 20)
-set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
 # PyTorch headers require C++20; GCC < 11.3 has incomplete C++20 support.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "11.3")
@@ -49,27 +47,17 @@ install(CODE "set(CMAKE_INSTALL_LOCAL_ONLY TRUE)" ALL_COMPONENTS)
 set(PYTHON_SUPPORTED_VERSIONS "3.10" "3.11" "3.12" "3.13" "3.14")
 
 # Supported AMD GPU architectures.
-set(HIP_SUPPORTED_ARCHS "gfx906;gfx908;gfx90a;gfx942;gfx950;gfx1250;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
 
-# ROCm installation prefix. Default to /opt/rocm but allow override via
-# -DROCM_PATH=/your/rocm/path when invoking cmake.
-if(NOT DEFINED ROCM_PATH)
-  set(ROCM_PATH "/opt/rocm" CACHE PATH "ROCm installation prefix")
-else()
-  set(ROCM_PATH ${ROCM_PATH} CACHE PATH "ROCm installation prefix" FORCE)
-endif()
 #
-# Supported/expected torch versions for CUDA/ROCm.
+# Supported/expected torch version for CUDA.
 #
 # Currently, having an incorrect pytorch version results in a warning
 # rather than an error.
 #
 # Note: the CUDA torch version is derived from pyproject.toml and various
-# requirements.txt files and should be kept consistent.  The ROCm torch
-# versions are derived from docker/Dockerfile.rocm
+# requirements.txt files and should be kept consistent.
 #
 set(TORCH_SUPPORTED_VERSION_CUDA "2.13.0")
-set(TORCH_SUPPORTED_VERSION_ROCM "2.13.0")
 # TORCH_NIGHTLY=1 builds run against unpinned nightly wheels, so the supported-
 # version check would always warn. Only treat it as a nightly build when the
 # value is exactly "1" (the bootstrap exports TORCH_NIGHTLY=0 by default, which
@@ -105,7 +93,7 @@ endif()
 
 #
 # Import torch cmake configuration.
-# Torch also imports CUDA (and partially HIP) languages with some customizations,
+# Torch also imports the CUDA language with some customizations,
 # so there is no need to do this explicitly with check_language/enable_language,
 # etc.
 #
@@ -182,29 +170,15 @@ endif()
 # Set up GPU language and check the torch version and warn if it isn't
 # what is expected.
 #
-if (NOT HIP_FOUND AND NOT PYTORCH_FOUND_HIP AND CUDA_FOUND)
+if (CUDA_FOUND)
   set(VLLM_GPU_LANG "CUDA")
 
   if (NOT TORCH_NIGHTLY_BUILD AND NOT Torch_VERSION VERSION_EQUAL ${TORCH_SUPPORTED_VERSION_CUDA})
     message(WARNING "Pytorch version ${TORCH_SUPPORTED_VERSION_CUDA} "
       "expected for CUDA build, saw ${Torch_VERSION} instead.")
   endif()
-elseif(HIP_FOUND OR PYTORCH_FOUND_HIP)
-  set(VLLM_GPU_LANG "HIP")
-
-  # Importing torch recognizes and sets up some HIP/ROCm configuration but does
-  # not let cmake recognize .hip files. In order to get cmake to understand the
-  # .hip extension automatically, HIP must be enabled explicitly.
-  enable_language(HIP)
-
-  # ROCm 5.X and 6.X
-  if (NOT TORCH_NIGHTLY_BUILD AND ROCM_VERSION_DEV_MAJOR GREATER_EQUAL 5 AND
-      Torch_VERSION VERSION_LESS ${TORCH_SUPPORTED_VERSION_ROCM})
-    message(WARNING "Pytorch version >= ${TORCH_SUPPORTED_VERSION_ROCM} "
-      "expected for ROCm build, saw ${Torch_VERSION} instead.")
-  endif()
 else()
-  message(FATAL_ERROR "Can't find CUDA or HIP installation.")
+  message(FATAL_ERROR "Can't find a CUDA installation.")
 endif()
 
 
@@ -234,15 +208,6 @@ if(VLLM_GPU_LANG STREQUAL "CUDA")
       "supported: ${CUDA_SUPPORTED_ARCHS}. "
       "Set TORCH_CUDA_ARCH_LIST for your GPU (e.g. 12.0).")
   endif()
-else()
-  #
-  # For other GPU targets override the GPU architectures detected by cmake/torch
-  # and filter them by the supported versions for the current language.
-  # The final set of arches is stored in `VLLM_GPU_ARCHES`.
-  #
-  override_gpu_arches(VLLM_GPU_ARCHES
-    ${VLLM_GPU_LANG}
-    "${${VLLM_GPU_LANG}_SUPPORTED_ARCHS}")
 endif()
 
 #
@@ -288,31 +253,6 @@ include(FetchContent)
 file(MAKE_DIRECTORY ${FETCHCONTENT_BASE_DIR}) # Ensure the directory exists
 message(STATUS "FetchContent base directory: ${FETCHCONTENT_BASE_DIR}")
 
-if(VLLM_GPU_LANG STREQUAL "HIP")
-  #
-  # Overriding the default -O set up by cmake, adding ggdb3 for the most verbose devug info
-  #
-  set(CMAKE_${VLLM_GPU_LANG}_FLAGS_DEBUG "${CMAKE_${VLLM_GPU_LANG}_FLAGS_DEBUG} -O0 -ggdb3")
-  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -ggdb3")
-
-  #
-  # Certain HIP functions are marked as [[nodiscard]], yet vllm ignores the result which generates
-  # a lot of warnings that always mask real issues. Suppressing until this is properly addressed.
-  #
-  set(CMAKE_${VLLM_GPU_LANG}_FLAGS "${CMAKE_${VLLM_GPU_LANG}_FLAGS} -Wno-unused-result -Wno-unused-value")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-result -Wno-unused-value")
-
-  # When using LTO then *.cpp files must be compiled with same compiler as used linker
-  # So if HIP uses clang linker we also must use it
-  # Otherwise symbols will be missing from .so
-  if (CMAKE_CXX_FLAGS MATCHES "\-flto")
-    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL CMAKE_HIP_COMPILER_ID)
-      message(FATAL_ERROR "LTO is enabled for ROCm build, but the C++ compiler (${CMAKE_CXX_COMPILER_ID}) and HIP compiler (${CMAKE_HIP_COMPILER_ID}) are different which is not supported. "
-                          "Please ensure they are same by setting CXX=${CMAKE_HIP_COMPILER} environment variable. Or alternatively disable LTO.")
-    endif()
-   endif()
-endif()
-
 #
 # Define other extension targets
 #
@@ -328,27 +268,10 @@ set_gencode_flags_for_srcs(
   SRCS "${VLLM_CUMEM_EXT_SRC}"
   CUDA_ARCHS "${CUDA_ARCHS}")
 
-if(VLLM_GPU_LANG STREQUAL "CUDA" OR VLLM_GPU_LANG STREQUAL "HIP")
+if(VLLM_GPU_LANG STREQUAL "CUDA")
   message(STATUS "Enabling cumem allocator extension.")
-  if(VLLM_GPU_LANG STREQUAL "CUDA")
-    # link against cuda driver library
-    list(APPEND CUMEM_LIBS CUDA::cuda_driver)
-  else()
-    # link against rocm driver library. Prefer an absolute path to
-    # libamdhip64.so inside ${ROCM_PATH}/lib if available, otherwise fall
-    # back to linking by name "amdhip64".
-    find_library(AMDHIP64_LIB
-      NAMES amdhip64 libamdhip64.so
-      PATHS ${ROCM_PATH}/lib
-      NO_DEFAULT_PATH)
-    if(AMDHIP64_LIB)
-      message(STATUS "Found libamdhip64 at ${AMDHIP64_LIB}")
-      list(APPEND CUMEM_LIBS ${AMDHIP64_LIB})
-    else()
-      message(WARNING "libamdhip64 not found in ${ROCM_PATH}/lib; falling back to linking 'amdhip64' by name")
-      list(APPEND CUMEM_LIBS amdhip64)
-    endif()
-  endif()
+  # link against cuda driver library
+  list(APPEND CUMEM_LIBS CUDA::cuda_driver)
   define_extension_target(
     cumem_allocator
     DESTINATION vllm
@@ -359,36 +282,7 @@ if(VLLM_GPU_LANG STREQUAL "CUDA" OR VLLM_GPU_LANG STREQUAL "HIP")
     WITH_SOABI)
 endif()
 
-#
-# Legacy _C extension (ROCm only — CUDA ops migrated to _C_stable_libtorch)
-#
-
-if(VLLM_GPU_LANG STREQUAL "HIP")
-  set(VLLM_EXT_SRC
-    "csrc/torch_bindings.cpp"
-    "csrc/custom_quickreduce.cu")
-
-  message(STATUS "Enabling C extension.")
-  define_extension_target(
-    _C
-    DESTINATION vllm
-    LANGUAGE ${VLLM_GPU_LANG}
-    SOURCES ${VLLM_EXT_SRC}
-    COMPILE_FLAGS ${VLLM_GPU_FLAGS}
-    ARCHITECTURES ${VLLM_GPU_ARCHES}
-    INCLUDE_DIRECTORIES ${CUTLASS_INCLUDE_DIR}
-    INCLUDE_DIRECTORIES ${CUTLASS_TOOLS_UTIL_INCLUDE_DIR}
-    USE_SABI 3
-    WITH_SOABI)
-
-  # If CUTLASS is compiled on NVCC >= 12.5, it by default uses
-  # cudaGetDriverEntryPointByVersion as a wrapper to avoid directly calling the
-  # driver API. This causes problems when linking with earlier versions of CUDA.
-  # Setting this variable sidesteps the issue by calling the driver directly.
-  target_compile_definitions(_C PRIVATE CUTLASS_ENABLE_DIRECT_CUDA_DRIVER_CALL=1)
-endif() # _C HIP endif
-
-if(VLLM_GPU_LANG STREQUAL "CUDA" OR VLLM_GPU_LANG STREQUAL "HIP")
+if(VLLM_GPU_LANG STREQUAL "CUDA")
   #
   # _C_stable_libtorch extension (ops registered via STABLE_TORCH_LIBRARY)
   #
@@ -1175,24 +1069,6 @@ if(VLLM_GPU_LANG STREQUAL "CUDA" OR VLLM_GPU_LANG STREQUAL "HIP")
   # if CUDA endif
   endif()
 
-  # HIP counterpart of the FUSED_KDA_DECODE block above: same `fused_kda_decode`
-  # op, same VLLM_ENABLE_FUSED_KDA_DECODE guard in torch_bindings.cpp. Only
-  # measured on gfx950, so it is only built when gfx950 is in the arch list.
-  # A multi-arch build that includes gfx950 still emits this source for every
-  # arch in that list. The runtime gate in kda_decode.py keeps the kernel off
-  # non-gfx950 devices.
-  if(VLLM_GPU_LANG STREQUAL "HIP")
-    set(FUSED_KDA_DECODE_HIP_ARCHS ${VLLM_GPU_ARCHES})
-    list(FILTER FUSED_KDA_DECODE_HIP_ARCHS INCLUDE REGEX "gfx950")
-    if(FUSED_KDA_DECODE_HIP_ARCHS)
-      set(FUSED_KDA_DECODE_HIP_SRC
-        "csrc/libtorch_stable/kimi_k3/fused_kda_decode_kernel_rocm.cu")
-      list(APPEND VLLM_STABLE_EXT_SRC "${FUSED_KDA_DECODE_HIP_SRC}")
-      message(STATUS
-        "Building fused KDA decode for HIP archs: ${FUSED_KDA_DECODE_HIP_ARCHS}")
-    endif()
-  endif()
-
   message(STATUS "Enabling C_stable extension.")
   list(REMOVE_DUPLICATES VLLM_STABLE_EXT_SRC)
   define_extension_target(
@@ -1235,12 +1111,6 @@ if(VLLM_GPU_LANG STREQUAL "CUDA" OR VLLM_GPU_LANG STREQUAL "HIP")
     # Needed by CUTLASS kernels
     target_compile_definitions(_C_stable_libtorch PRIVATE
       CUTLASS_ENABLE_DIRECT_CUDA_DRIVER_CALL=1)
-  elseif(VLLM_GPU_LANG STREQUAL "HIP")
-    target_compile_definitions(_C_stable_libtorch PRIVATE USE_ROCM)
-    if(FUSED_KDA_DECODE_HIP_SRC)
-      target_compile_definitions(_C_stable_libtorch PRIVATE
-        VLLM_ENABLE_FUSED_KDA_DECODE=1)
-    endif()
   endif()
 
   # On ROCm, _C_stable_libtorch calls raw HIP APIs (e.g. hipGetDevice in
@@ -1253,14 +1123,6 @@ if(VLLM_GPU_LANG STREQUAL "CUDA" OR VLLM_GPU_LANG STREQUAL "HIP")
   # If PyTorch doesn't bundle libamdhip64 (built from source against system
   # ROCm), there is only one copy in the process and no action is needed —
   # the HIP compiler already links the system libamdhip64 automatically.
-  if(VLLM_GPU_LANG STREQUAL "HIP")
-    find_library(_STABLE_TORCH_AMDHIP64 amdhip64
-      PATHS "${TORCH_INSTALL_PREFIX}/lib" NO_DEFAULT_PATH)
-    if(_STABLE_TORCH_AMDHIP64)
-      message(STATUS "Found PyTorch-bundled libamdhip64 at ${_STABLE_TORCH_AMDHIP64}")
-      target_link_libraries(_C_stable_libtorch PRIVATE ${_STABLE_TORCH_AMDHIP64})
-    endif()
-  endif()
 endif()
 
 #
@@ -1460,8 +1322,6 @@ if(VLLM_GPU_LANG STREQUAL "CUDA")
   # Needed by CUTLASS kernels
   target_compile_definitions(_moe_C_stable_libtorch PRIVATE
     CUTLASS_ENABLE_DIRECT_CUDA_DRIVER_CALL=1)
-elseif(VLLM_GPU_LANG STREQUAL "HIP")
-  target_compile_definitions(_moe_C_stable_libtorch PRIVATE USE_ROCM)
 endif()
 
 # On ROCm, _moe_C_stable_libtorch calls raw HIP APIs (e.g. hipGetDevice in
@@ -1474,95 +1334,9 @@ endif()
 # If PyTorch doesn't bundle libamdhip64 (built from source against system
 # ROCm), there is only one copy in the process and no action is needed —
 # the HIP compiler already links the system libamdhip64 automatically.
-if(VLLM_GPU_LANG STREQUAL "HIP")
-  find_library(_MOE_STABLE_TORCH_AMDHIP64 amdhip64
-    PATHS "${TORCH_INSTALL_PREFIX}/lib" NO_DEFAULT_PATH)
-  if(_MOE_STABLE_TORCH_AMDHIP64)
-    message(STATUS "Found PyTorch-bundled libamdhip64 for _moe_C_stable_libtorch at ${_MOE_STABLE_TORCH_AMDHIP64}")
-    target_link_libraries(_moe_C_stable_libtorch PRIVATE ${_MOE_STABLE_TORCH_AMDHIP64})
-  endif()
-endif()
 
-if(VLLM_GPU_LANG STREQUAL "HIP")
-  #
-  # _rocm_C extension
-  #
-  set(VLLM_ROCM_EXT_SRC
-    "csrc/rocm/torch_bindings.cpp"
-    "csrc/rocm/skinny_gemms.cu"
-    "csrc/rocm/skinny_gemms_int4.cu"
-    "csrc/rocm/attention.cu")
-  set(VLLM_ROCM_EXT_FLAGS ${VLLM_GPU_FLAGS})
-
-  # skinny_gemms*.cu are built on gfx9/gfx11 ISA (MFMA, dot2/dot4, legacy
-  # s_waitcnt asm) that gfx1250 (gfx12) does not provide. Exclude them from the
-  # gfx1250 build and disable their op registrations (VLLM_SKIP_SKINNY_GEMMS);
-  # vLLM falls back to default/Triton GEMM for those ops on gfx1250.
-  list(REMOVE_ITEM VLLM_ROCM_EXT_SRC "csrc/rocm/skinny_gemms.cu")
-  list(REMOVE_ITEM VLLM_ROCM_EXT_SRC "csrc/rocm/skinny_gemms_int4.cu")
-  set(VLLM_SKINNY_ARCHES ${VLLM_GPU_ARCHES})
-  list(FILTER VLLM_SKINNY_ARCHES EXCLUDE REGEX "gfx1250")
-  if(VLLM_SKINNY_ARCHES)
-    message(STATUS "Building skinny_gemms for archs: ${VLLM_SKINNY_ARCHES}")
-    set(VLLM_SKINNY_SRC
-      "csrc/rocm/skinny_gemms.cu"
-      "csrc/rocm/skinny_gemms_int4.cu")
-    hipify_sources_target(VLLM_SKINNY_HIP_SRCS _rocm_C_skinny "${VLLM_SKINNY_SRC}")
-    unset(_VLLM_LAST_HIPIFY_TARGET)
-    add_library(_rocm_C_skinny OBJECT ${VLLM_SKINNY_HIP_SRCS})
-    add_dependencies(_rocm_C_skinny hipify_all)
-    set_source_files_properties(${VLLM_SKINNY_HIP_SRCS} PROPERTIES LANGUAGE ${VLLM_GPU_LANG})
-    set_target_properties(_rocm_C_skinny PROPERTIES
-      ${VLLM_GPU_LANG}_ARCHITECTURES "${VLLM_SKINNY_ARCHES}"
-      POSITION_INDEPENDENT_CODE ON)
-    target_include_directories(_rocm_C_skinny PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/csrc)
-    target_compile_options(_rocm_C_skinny PRIVATE
-      $<$<COMPILE_LANGUAGE:${VLLM_GPU_LANG}>:${VLLM_ROCM_EXT_FLAGS}>)
-    target_compile_definitions(_rocm_C_skinny PRIVATE "-DTORCH_EXTENSION_NAME=_rocm_C")
-    target_link_libraries(_rocm_C_skinny PRIVATE torch)
-  else()
-    message(STATUS "Only gfx1250, skipping skinny_gemms")
-    list(APPEND VLLM_ROCM_EXT_FLAGS "-DVLLM_SKIP_SKINNY_GEMMS")
-  endif()
-
-  set(VLLM_ROCM_HAS_GFX1100 OFF)
-  if(VLLM_GPU_ARCHES MATCHES "gfx1100")
-    set(VLLM_ROCM_HAS_GFX1100 ON)
-    list(APPEND VLLM_ROCM_EXT_SRC
-      "csrc/rocm/q_gemm_rdna3.cu"
-      "csrc/rocm/q_gemm_rdna3_wmma.cu"
-      "csrc/rocm/moe_q_gemm_rdna3.cu")
-  endif()
-
-  define_extension_target(
-    _rocm_C
-    DESTINATION vllm
-    LANGUAGE ${VLLM_GPU_LANG}
-    SOURCES ${VLLM_ROCM_EXT_SRC}
-    COMPILE_FLAGS ${VLLM_ROCM_EXT_FLAGS}
-    ARCHITECTURES ${VLLM_GPU_ARCHES}
-    USE_SABI 3
-    WITH_SOABI)
-  
-  if(TARGET _rocm_C_skinny)
-    target_link_libraries(_rocm_C PRIVATE _rocm_C_skinny)
-  else()
-    target_compile_definitions(_rocm_C PRIVATE VLLM_SKIP_SKINNY_GEMMS)
-  endif()
-
-  if(VLLM_ROCM_HAS_GFX1100)
-    target_compile_definitions(_rocm_C PRIVATE VLLM_ROCM_GFX1100)
-  endif()
-endif()
-
-# Must run after the last HIP `define_extension_target` so every extension
-# has registered its sources.
-if (VLLM_GPU_LANG STREQUAL "HIP")
-  vllm_finalize_hipify_target()
-endif()
-
-# For CUDA and HIP builds also build the triton_kernels external package.
-if(VLLM_GPU_LANG STREQUAL "CUDA" OR VLLM_GPU_LANG STREQUAL "HIP")
+# Also build the triton_kernels external package.
+if(VLLM_GPU_LANG STREQUAL "CUDA")
     include(cmake/external_projects/triton_kernels.cmake)
 endif()
 

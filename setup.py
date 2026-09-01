@@ -82,10 +82,7 @@ def is_metadata_only_build() -> bool:
     return bool({"egg_info", "dist_info"}.intersection(sys.argv[1:]))
 
 
-if sys.platform.startswith("darwin") and VLLM_TARGET_DEVICE != "cpu":
-    logger.warning("VLLM_TARGET_DEVICE automatically set to `cpu` due to macOS")
-    VLLM_TARGET_DEVICE = "cpu"
-elif not (sys.platform.startswith("linux") or sys.platform.startswith("darwin")):
+if not (sys.platform.startswith("linux") or sys.platform.startswith("darwin")):
     logger.warning(
         "vLLM only supports Linux platform (including WSL) and MacOS."
         "Building on %s, "
@@ -94,17 +91,14 @@ elif not (sys.platform.startswith("linux") or sys.platform.startswith("darwin"))
     )
     VLLM_TARGET_DEVICE = "empty"
 elif sys.platform.startswith("linux") and os.getenv("VLLM_TARGET_DEVICE") is None:
-    if torch.version.hip is not None:
-        VLLM_TARGET_DEVICE = "rocm"
-        logger.info("Auto-detected ROCm")
-    elif torch.version.xpu is not None:
-        VLLM_TARGET_DEVICE = "xpu"
-        logger.info("Auto-detected XPU")
-    elif torch.version.cuda is not None:
+    if torch.version.cuda is not None:
         VLLM_TARGET_DEVICE = "cuda"
         logger.info("Auto-detected CUDA")
     else:
-        VLLM_TARGET_DEVICE = "cpu"
+        raise RuntimeError(
+            "No CUDA toolkit found. This tree is CUDA-only; the ROCm, CPU, XPU "
+            "and TPU builds were removed."
+        )
 
 
 def is_sccache_available() -> bool:
@@ -1339,16 +1333,10 @@ def get_requirements() -> list[str]:
                 req = req.replace("humming-kernels[cu13]", "humming-kernels[cu12]")
             modified_requirements.append(req)
         requirements = modified_requirements
-    elif _is_hip():
-        requirements = _read_requirements("rocm.txt")
-    elif _is_tpu():
-        requirements = _read_requirements("tpu.txt")
-    elif _is_cpu():
-        requirements = _read_requirements("cpu.txt")
-    elif _is_xpu():
-        requirements = _read_requirements("xpu.txt")
     else:
-        raise ValueError("Unsupported platform, please use CUDA, ROCm, or CPU.")
+        raise ValueError(
+            "This tree is CUDA-only; the ROCm, CPU, XPU and TPU builds were removed."
+        )
     return requirements
 
 
