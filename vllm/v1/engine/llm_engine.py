@@ -67,18 +67,12 @@ class LLMEngine:
         self.log_stats = log_stats
 
         parallel_config = vllm_config.parallel_config
-        executor_backend = parallel_config.distributed_executor_backend
 
-        self.external_launcher_dp = (
-            parallel_config.data_parallel_size > 1
-            and executor_backend == "external_launcher"
-        )
         # important: init dp group before init the engine_core
         # In the decoupled engine case this is handled in EngineCoreProc.
         if (
             not multiprocess_mode
             and parallel_config.data_parallel_size > 1
-            and not self.external_launcher_dp
         ):
             self.dp_group = parallel_config.stateless_init_dp_group()
         else:
@@ -128,11 +122,6 @@ class LLMEngine:
                 self._finalizer = weakref.finalize(
                     self, LLMEngine._cleanup_instance_caches, model
                 )
-
-        if self.external_launcher_dp:
-            # If we use DP in external launcher mode, we reuse the
-            # existing DP group used for data communication.
-            self.dp_group = get_dp_group().cpu_group
 
         # Don't keep the dummy data in memory
         self.reset_mm_cache()
@@ -432,5 +421,5 @@ class LLMEngine:
 
     def __del__(self):
         dp_group = getattr(self, "dp_group", None)
-        if dp_group is not None and not self.external_launcher_dp:
+        if dp_group is not None:
             stateless_destroy_torch_distributed_process_group(dp_group)

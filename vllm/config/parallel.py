@@ -874,16 +874,6 @@ class ParallelConfig:
 
         if self.data_parallel_size > 1 or self.data_parallel_size_local == 0:
             # Data parallel was specified in the engine args.
-            if self.distributed_executor_backend == "external_launcher":
-                # For external launcher,
-                # we need to set the data parallel rank automatically
-                self.data_parallel_rank = int(os.environ["RANK"]) // (
-                    self.world_size // self.data_parallel_size
-                )
-                logger.info(
-                    "Set data_parallel_rank to %d automatically.",
-                    self.data_parallel_rank,
-                )
             if not self.enable_elastic_ep:
                 if not self._data_parallel_master_port_list:
                     self._data_parallel_master_port_list = get_open_ports_list(5)

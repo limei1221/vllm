@@ -282,7 +282,6 @@ class LLM(OfflineInferenceMixin):
         _distributed_executor_backend = kwargs.get("distributed_executor_backend")
         if (
             _dp_size > 1
-            and not _distributed_executor_backend == "external_launcher"
             and not current_platform.is_tpu()
         ):
             raise ValueError(

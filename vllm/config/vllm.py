@@ -930,13 +930,6 @@ class VllmConfig:
             self.kv_transfer_config.kv_connector_extra_config.update(
                 {"cpu_bytes_to_use": kv_offloading_size * (1 << 30)}
             )
-        elif kv_offloading_backend == "lmcache":
-            # Default to LMCache multi-process (MP) mode. The actual KV
-            # storage capacity is managed by the standalone LMCache server
-            # process, so ``kv_offloading_size`` is not propagated here.
-            # ``LMCacheMPConnector`` falls back to ``tcp://localhost:5555``
-            # when host/port are not provided via extra_config.
-            self.kv_transfer_config.kv_connector = "LMCacheMPConnector"
 
         # This is the same for all backends
         self.kv_transfer_config.kv_role = "kv_both"
@@ -952,7 +945,7 @@ class VllmConfig:
         # PyTorch's expandable_segments allocator uses CUDA VMM, which can
         # remap a virtual address range to different physical pages over the
         # engine's lifetime. KV connectors that pin KV cache memory (e.g.
-        # NixlConnector via ibv_reg_mr, MooncakeConnector) end up with their
+        # NixlConnector via ibv_reg_mr) end up with their
         # registrations pointing at stale physical pages after any remap,
         # producing RDMA failures like IBV_WC_REM_ACCESS_ERR /
         # NIXL_ERR_REMOTE_DISCONNECT at the first inter-node KV transfer.
@@ -977,7 +970,7 @@ class VllmConfig:
             "unless enable_cumem_allocator is also enabled. PyTorch's CUDA VMM "
             "allocator can remap KV cache virtual addresses to different "
             "physical pages, invalidating any pinned/registered KV memory "
-            "(e.g. IB memory regions registered by NIXL or Mooncake). Either "
+            "(e.g. IB memory regions registered by NIXL). Either "
             "unset expandable_segments:True or enable the cumem allocator "
             "(sleep mode does this automatically and also "
             "routes KV allocations through CuMemAllocator's pool, where "
@@ -2222,14 +2215,6 @@ class VllmConfig:
             and self.parallel_config.tensor_parallel_size > 1
         ):
             unsupported.append("sequence parallelism")
-
-        # V2 does not implement the external_launcher (torchrun) PP-output
-        # broadcast that V1 uses to keep all ranks in sync (broadcast_pp_output).
-        if (
-            self.parallel_config.distributed_executor_backend == "external_launcher"
-            and self.parallel_config.pipeline_parallel_size > 1
-        ):
-            unsupported.append("pipeline parallelism with external_launcher")
 
         if speculative_config is not None:
             # TODO: ngram / ngram_gpu are not supported by the v2 model runner yet

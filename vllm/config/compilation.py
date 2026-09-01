@@ -663,7 +663,6 @@ class CompilationConfig:
     for all cases, incurring the overhead of running LoRA ops even when no
     adapters are active. Setting this to True will remove this overhead at the
     cost of increased startup time and slightly higher memory usage.
-    When `enable_lora` is False, this option has no effect.
     """
 
     use_inductor_graph_partition: bool = None  # type: ignore[assignment]

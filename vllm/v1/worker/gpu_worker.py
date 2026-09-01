@@ -1080,11 +1080,7 @@ class Worker(WorkerBase):
                 return output
 
         assert isinstance(output, IntermediateTensors)
-        parallel_config = self.vllm_config.parallel_config
-        assert (
-            parallel_config.distributed_executor_backend != "external_launcher"
-            and not get_pp_group().is_last_rank
-        )
+        assert not get_pp_group().is_last_rank
 
         # launch non-blocking send of intermediate tensors
         self._pp_send_work = get_pp_group().isend_tensor_dict(

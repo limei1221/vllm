@@ -410,14 +410,7 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
         self.max_num_tokens = scheduler_config.max_num_batched_tokens
         self.max_num_reqs = scheduler_config.max_num_seqs
 
-        # Broadcast PP output for external_launcher (torchrun)
-        # to make sure we are synced across pp ranks
-        # TODO: Support overlapping micro-batches
-        # https://github.com/vllm-project/vllm/issues/18019
-        self.broadcast_pp_output = (
-            self.parallel_config.distributed_executor_backend == "external_launcher"
-            and len(get_pp_group().ranks) > 1
-        )
+        self.broadcast_pp_output = False
 
         # Model-related.
         self.num_query_heads = model_config.get_num_attention_heads(parallel_config)
@@ -3300,18 +3293,6 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
             deferred_state_corrections_fn = self._update_states(scheduler_output)
 
             if not num_scheduled_tokens:
-                if (
-                    self.parallel_config.distributed_executor_backend
-                    == "external_launcher"
-                    and self.parallel_config.data_parallel_size > 1
-                ):
-                    # this is a corner case when both external launcher
-                    # and DP are enabled, num_scheduled_tokens could be
-                    # 0, and has_unfinished_requests in the outer loop
-                    # returns True. before returning early here we call
-                    # dummy run to ensure coordinate_batch_across_dp
-                    # is called into to avoid out of sync issues.
-                    self._dummy_run(1)
                 if not has_kv_transfer_group():
                     # Return empty ModelRunnerOutput if no work to do.
                     return EMPTY_MODEL_RUNNER_OUTPUT
@@ -3613,9 +3594,6 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
         )
         if self.use_async_scheduling:
             pp = get_pp_group()
-            # For torchrun external_launcher PP mode with broadcast_pp_output=True,
-            # PP outputs have been broadcasted to all ranks at logits computation.
-            # Therefore, here is no need to send sampled token ids again in this case.
             if not self.broadcast_pp_output and pp.world_size > 1 and pp.is_last_rank:
                 self._pp_broadcast_prev_sampled_token_ids(
                     sampler_output.sampled_token_ids
