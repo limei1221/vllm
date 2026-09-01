@@ -70,98 +70,25 @@ class LazyConfigDict(dict):
 
 
 _CONFIG_REGISTRY: dict[str, type[PretrainedConfig]] = LazyConfigDict(
-    afmoe="AfmoeConfig",
-    arctic="ArcticConfig",
-    axk1="AXK1Config",
-    bagel="BagelConfig",
-    umm="CheersConfig",
-    chatglm="ChatGLMConfig",
-    modernvbert="ColModernVBertConfig",
-    colpali="ColPaliConfig",
-    colqwen3="ColQwen3Config",
-    ops_colqwen3="OpsColQwen3Config",
-    qwen3_vl_nemotron_embed="Qwen3VLNemotronEmbedConfig",
-    cosmos3_omni="Cosmos3Config",
-    cosmos3_edge="Cosmos3EdgeConfig",
-    diffusion_gemma="DiffusionGemmaConfig",
-    deepseek_vl_v2="DeepseekVLV2Config",
-    deepseek_v32="DeepseekV3Config",
-    deepseek_v4="DeepseekV4Config",
-    dots3_note="Dots3NoteConfig",
-    k3_dspark="K3DSparkConfig",
-    flex_olmo="FlexOlmoConfig",
-    fireredlid="FireRedLIDConfig",
-    funaudiochat="FunAudioChatConfig",
-    granite4_vision="Granite4VisionConfig",
-    hyperclovax="HyperCLOVAXConfig",
-    hyperclovax_vlm="HCXVisionConfig",
-    hunyuan_vl="HunYuanVLConfig",
-    hy_v3="HYV3Config",
-    isaac="IsaacConfig",
-    kimi_k2="DeepseekV3Config",  # Kimi K2 uses same architecture as DeepSeek V3
-    kimi_linear="KimiLinearConfig",
-    kimi_vl="KimiVLConfig",
-    kimi_k25="KimiK25Config",
-    muse_glimmer="MuseGlimmerConfig",
-    muse_glimmer_text="MuseGlimmerTextConfig",
-    muse_glimmer_vision="MuseGlimmerVisionConfig",
-    muse_glimmer_assistant="MuseGlimmerAssistantConfig",
-    kimi_k3="KimiK3Config",
-    RefinedWeb="RWConfig",  # For tiiuae/falcon-40b(-instruct)
-    RefinedWebModel="RWConfig",  # For tiiuae/falcon-7b(-instruct)
-    mlp_speculator="MLPSpeculatorConfig",
-    medusa="MedusaConfig",
-    mellum="MellumConfig",
-    midashenglm="MiDashengLMConfig",
-    minimax_m3_vl="MiniMaxM3Config",
-    minimax_m3_mtp="MiniMaxM3MTPConfig",
-    moondream3="Moondream3Config",
-    moss_transcribe_diarize="MossTranscribeDiarizeConfig",
     eagle="EAGLEConfig",
     speculators="SpeculatorsConfig",
-    nemotron="NemotronConfig",
-    olmo_hybrid="OlmoHybridConfig",
-    openvla="OpenVLAConfig",
-    ovis="OvisConfig",
-    ultravox="UltravoxConfig",
-    step3_vl="Step3VLConfig",
-    step3_text="Step3TextConfig",
-    step3p5="Step3p5Config",
-    qianfan_ocr="QianfanOCRConfig",
-    qwen3_asr="Qwen3ASRConfig",
-    qwen3_next="Qwen3NextConfig",
-    qwen3_5="Qwen3_5Config",
-    qwen3_5_text="Qwen3_5TextConfig",
-    qwen3_5_moe="Qwen3_5MoeConfig",
-    qwen3_5_moe_text="Qwen3_5MoeTextConfig",
-    laguna="LagunaConfig",
-    lfm2_moe="Lfm2MoeConfig",
-    **{"unlimited-ocr": "UnlimitedOCRConfig"},
-    inkling_mm_model="InklingMMConfig",
-    inkling_model="InklingModelConfig",
 )
 
-_SPECULATIVE_DECODING_CONFIGS: set[str] = {"eagle", "speculators", "medusa"}
+_SPECULATIVE_DECODING_CONFIGS: set[str] = {"eagle", "speculators"}
 
-_PATCH_HF_VALIDATE_ROPE: set[str] = {"sarvam_mla"}
+_PATCH_HF_VALIDATE_ROPE: set[str] = set()
 
 # Model types whose checkpoints declare `layer_types` entries that upstream
 # transformers has not added to `ALLOWED_LAYER_TYPES` yet, so its strict config
 # validation rejects them (e.g.  GLM-5.2 `glm_moe_dsa` use
 # `deepseek_sparse_attention`). Extend the allowed set for these model types.
-_PATCH_HF_ALLOWED_LAYER_TYPES: dict[str, tuple[str, ...]] = {
-    "glm_moe_dsa": ("deepseek_sparse_attention",),
-}
+_PATCH_HF_ALLOWED_LAYER_TYPES: dict[str, tuple[str, ...]] = {}
 
 _CONFIG_ATTRS_MAPPING: dict[str, str] = {
     "llm_config": "text_config",
 }
 
-_AUTO_CONFIG_KWARGS_OVERRIDES: dict[str, dict[str, Any]] = {
-    "internvl_chat": {"has_no_defaults_at_init": True},
-    "Llama_Nemotron_Nano_VL": {"attn_implementation": "eager"},
-    "NVLM_D": {"has_no_defaults_at_init": True},
-}
+_AUTO_CONFIG_KWARGS_OVERRIDES: dict[str, dict[str, Any]] = {}
 
 
 def _register_config_class(

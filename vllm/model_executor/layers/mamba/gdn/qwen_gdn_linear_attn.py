@@ -6,6 +6,7 @@ import os
 from typing import Literal
 
 import torch
+from transformers import PretrainedConfig
 from einops import rearrange
 from torch import nn
 
@@ -57,7 +58,6 @@ from vllm.third_party.flash_linear_attention.ops import (
 )
 from vllm.third_party.flash_linear_attention.ops.chunk import l2norm_fwd
 from vllm.third_party.flash_linear_attention.ops.utils import FLA_CHUNK_SIZE
-from vllm.transformers_utils.configs.qwen3_next import Qwen3NextConfig
 from vllm.triton_utils import tl, triton
 from vllm.utils.torch_utils import (
     LayerNameType,
@@ -363,7 +363,7 @@ class QwenGatedDeltaNetAttention(GatedDeltaNetAttention):
 
     def __init__(
         self,
-        config: Qwen3NextConfig,
+        config: "PretrainedConfig",
         vllm_config: VllmConfig,
         prefix: str = "",
         gqa_interleaved_layout=False,

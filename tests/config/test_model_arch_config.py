@@ -11,13 +11,10 @@ from unittest.mock import Mock
 
 import pytest
 from transformers import PretrainedConfig
-from transformers.models.gemma4.configuration_gemma4 import Gemma4TextConfig
 
 from vllm.config import ModelConfig, ParallelConfig, SpeculativeConfig
 from vllm.config.model_arch import ModelArchitectureConfig
-from vllm.transformers_utils.configs.gemma4 import gemma4_layer_config
 from vllm.transformers_utils.model_arch_config_convertor import (
-    Gemma4ModelArchConfigConvertor,
     ModelArchConfigConvertorBase,
 )
 
@@ -302,72 +299,14 @@ def test_from_layers_rejects_a_layer_count_mismatch():
         ModelArchitectureConfig.from_layers([_layer(), _layer(head_size=32)])
 
 
-def _gemma4_text_config(**overrides) -> Gemma4TextConfig:
-    """A six layer Gemma4 whose last layer is wider than the rest."""
-    fields = dict(
-        num_hidden_layers=6,
-        hidden_size=64,
-        num_attention_heads=8,
-        num_key_value_heads=4,
-        head_dim=16,
-        global_head_dim=32,
-        # Transformers forces the last layer to full attention.
-        layer_types=["sliding_attention"] * 5 + ["full_attention"],
-    )
-    return Gemma4TextConfig(**(fields | overrides))
 
 
-def test_gemma4_head_dims_vary_by_layer_type():
-    """Gemma4's full attention layers are wider than its sliding ones.
-
-    Transformers >= 5.15.0 says so in the config; this exercises the convertor
-    building the same per-layer view from the flat attributes used before that.
-    """
-    text_config = _gemma4_text_config(
-        num_global_key_value_heads=8, attention_k_eq_v=True
-    )
-
-    arch = Gemma4ModelArchConfigConvertor(text_config, text_config).convert()
-
-    assert (arch.head_size, arch.total_num_kv_heads) == (32, 8)
-    assert [arch[i].head_size for i in range(6)] == [16] * 5 + [32]
-    assert [arch[i].total_num_kv_heads for i in range(6)] == [4] * 5 + [8]
-    # The model files resolve each layer through the same helper, so the KV cache
-    # vLLM allocates and the projections the model builds cannot disagree.
-    assert [gemma4_layer_config(text_config, i).head_dim for i in range(6)] == [
-        arch[i].head_size for i in range(6)
-    ]
 
 
-def test_gemma4_without_global_kv_heads():
-    """`num_global_key_value_heads` defaults to `None`, not to a head count."""
-    text_config = _gemma4_text_config()
-
-    arch = Gemma4ModelArchConfigConvertor(text_config, text_config).convert()
-
-    assert arch.total_num_kv_heads == 4
-    assert [arch[i].head_size for i in range(6)] == [16] * 5 + [32]
 
 
-def test_gemma4_layer_count_comes_from_num_hidden_layers():
-    """`dummy_hf_overrides` shrinks the stack but leaves `layer_types` long."""
-    text_config = _gemma4_text_config()
-    text_config.num_hidden_layers = 3
-
-    arch = Gemma4ModelArchConfigConvertor(text_config, text_config).convert()
-
-    assert arch.total_num_hidden_layers == 3
-    # Only sliding layers survive the truncation, so nothing varies.
-    assert arch.per_layer_overrides is None
 
 
-def test_gemma4_uniform_head_dims_are_homogeneous():
-    text_config = _gemma4_text_config(global_head_dim=16)
-
-    arch = Gemma4ModelArchConfigConvertor(text_config, text_config).convert()
-
-    assert arch.per_layer_overrides is None
-    assert arch[3] is arch
 
 
 class _HeterogeneousConfig(PretrainedConfig):

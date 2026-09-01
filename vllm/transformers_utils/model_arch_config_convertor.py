@@ -17,7 +17,6 @@ from vllm.transformers_utils.config import (
     ConfigFormat,
     get_safetensors_params_metadata,
 )
-from vllm.transformers_utils.configs.gemma4 import gemma4_layer_config
 from vllm.utils.torch_utils import common_broadcastable_dtype
 
 logger = init_logger(__name__)
@@ -472,112 +471,22 @@ class ModelArchConfigConvertorBase:
         return model_arch_config
 
 
-class CohereAsrModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def get_total_num_attention_heads(self) -> int:
-        return self.hf_text_config.transf_decoder["config_dict"]["num_attention_heads"]
-
-    def get_head_size(self) -> int:
-        hidden_size = self.hf_text_config.transf_decoder["config_dict"]["hidden_size"]
-        num_attention_heads = self.hf_text_config.transf_decoder["config_dict"][
-            "num_attention_heads"
-        ]
-        return hidden_size // num_attention_heads
-
-    def get_total_num_kv_heads(self) -> int:
-        enc_num_kv_heads = self.hf_text_config.encoder["n_heads"]
-        dec_num_kv_heads = self.hf_text_config.transf_decoder["config_dict"][
-            "num_attention_heads"
-        ]
-        assert enc_num_kv_heads == dec_num_kv_heads, (
-            "Encoder and decoder must have the same number of kv heads"
-        )
-        return enc_num_kv_heads
-
-    def is_mm_prefix_lm(self, supports_multimodal: bool = True) -> bool:
-        return False
 
 
-class MambaModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def get_head_size(self) -> int:
-        return 0
-
-    def get_total_num_kv_heads(self) -> int:
-        return 0
 
 
-class TerratorchModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def get_head_size(self) -> int:
-        return 0
-
-    def get_total_num_kv_heads(self) -> int:
-        return 0
 
 
-class MedusaModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def get_head_size(self) -> int:
-        return 0
-
-    def get_total_num_kv_heads(self) -> int:
-        return 0
 
 
-class Zamba2ModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def get_head_size(self) -> int:
-        return getattr(self.hf_text_config, "attention_head_dim", 0)
 
 
-class FalconModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def get_total_num_kv_heads(self) -> int:
-        # NOTE: for falcon, when new_decoder_architecture is True, the
-        # multi_query flag is ignored and we use n_head_kv for the number of
-        # KV heads.
-        new_decoder_arch_falcon = getattr(
-            self.hf_text_config, "new_decoder_architecture", False
-        )
-
-        if not new_decoder_arch_falcon and getattr(
-            self.hf_text_config, "multi_query", False
-        ):
-            # Multi-query attention, only one KV head.
-            return 1
-
-        # Use the base implementation which checks n_head_kv, num_kv_heads, etc.
-        return super().get_total_num_kv_heads()
 
 
-class MPTModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def get_total_num_kv_heads(self) -> int:
-        if "kv_n_heads" in self.hf_text_config.attn_config:
-            return self.hf_text_config.attn_config["kv_n_heads"]
-        return self.hf_text_config.num_attention_heads
 
 
-class DbrxModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def get_total_num_kv_heads(self) -> int:
-        return getattr(
-            self.hf_text_config.attn_config,
-            "kv_n_heads",
-            self.hf_text_config.num_attention_heads,
-        )
 
 
-class NemotronNasModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def get_total_num_kv_heads(self) -> int:
-        for block in self.hf_text_config.block_configs:
-            if not block.attention.no_op:
-                return (
-                    self.hf_text_config.num_attention_heads
-                    // block.attention.n_heads_in_group
-                )
-        raise RuntimeError(
-            "Could not determine the number of key-value attention heads "
-            "from model configuration. "
-            f"Architecture: {self.get_architectures()}. "
-            "This usually indicates an unsupported model architecture or "
-            "missing configuration. "
-            "Please check if your model is supported at: "
-            "https://docs.vllm.ai/en/latest/models/supported_models.html"
-        )
 
 
 class DeepSeekMTPModelArchConfigConvertor(ModelArchConfigConvertorBase):
@@ -585,222 +494,39 @@ class DeepSeekMTPModelArchConfigConvertor(ModelArchConfigConvertorBase):
         return getattr(self.hf_text_config, "num_nextn_predict_layers", 0)
 
 
-class MimoMTPModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def get_num_hidden_layers(self) -> int:
-        return getattr(self.hf_text_config, "num_nextn_predict_layers", 0)
 
 
-def _strip_mimo_v2_attention_chunk_size(
-    hf_config: PretrainedConfig, hf_text_config: PretrainedConfig
-) -> None:
-    # MiMo-V2-Flash's config.json sets `attention_chunk_size=128` but the
-    # architecture does not actually use chunked local attention. Leaving it
-    # set makes vLLM disable the hybrid KV cache manager
-    for cfg in (hf_text_config, hf_config):
-        if cfg is not None and hasattr(cfg, "attention_chunk_size"):
-            delattr(cfg, "attention_chunk_size")
 
 
-class MimoV2ModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def __init__(
-        self,
-        hf_config: PretrainedConfig,
-        hf_text_config: PretrainedConfig,
-        revision: str | None = None,
-    ):
-        if getattr(hf_config, "vision_config", None):
-            hf_config.architectures = ["MiMoV2OmniForCausalLM"]
-        super().__init__(hf_config, hf_text_config, revision)
-        _strip_mimo_v2_attention_chunk_size(hf_config, hf_text_config)
 
 
-class MimoV2MTPModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def __init__(
-        self,
-        hf_config: PretrainedConfig,
-        hf_text_config: PretrainedConfig,
-        revision: str | None = None,
-    ):
-        super().__init__(hf_config, hf_text_config, revision)
-        _strip_mimo_v2_attention_chunk_size(hf_config, hf_text_config)
-
-    def get_num_hidden_layers(self) -> int:
-        n = getattr(self.hf_text_config, "num_nextn_predict_layers", None)
-        if n is not None:
-            return n
-        # Fall back to n_predict set by hf_config_override
-        n = getattr(self.hf_text_config, "n_predict", None)
-        return n if n is not None else 0
 
 
-class GLM4MoeMTPModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def get_num_hidden_layers(self) -> int:
-        return getattr(self.hf_text_config, "num_nextn_predict_layers", 0)
 
 
-class ErnieMTPModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def get_num_hidden_layers(self) -> int:
-        return getattr(self.hf_text_config, "num_nextn_predict_layers", 0)
 
 
-class Qwen3NextMTPModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def get_num_hidden_layers(self) -> int:
-        return getattr(self.hf_text_config, "num_nextn_predict_layers", 0)
 
 
-class BailingHybridMTPModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def get_num_hidden_layers(self) -> int:
-        return getattr(self.hf_text_config, "num_nextn_predict_layers", 0)
 
 
-class BailingHybridV3MTPModelArchConfigConvertor(
-    BailingHybridMTPModelArchConfigConvertor
-):
-    pass
 
 
-class Qwen3_5MTPModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def get_num_hidden_layers(self) -> int:
-        return getattr(self.hf_text_config, "mtp_num_hidden_layers", 0)
 
 
-class Step3p5MTPModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def get_num_hidden_layers(self) -> int:
-        return getattr(self.hf_text_config, "num_nextn_predict_layers", 0)
 
 
-class PanguUltraMoeMTPModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def get_num_hidden_layers(self) -> int:
-        return getattr(self.hf_text_config, "num_nextn_predict_layers", 0)
 
 
-class LongCatFlashMTPModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def get_num_hidden_layers(self) -> int:
-        return getattr(self.hf_text_config, "num_nextn_predict_layers", 1)
 
 
-class Gemma4MTPModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def get_hidden_size(self) -> int:
-        # The speculator buffer must match the backbone (target) model's
-        # hidden dimension, not the draft model's smaller dimension.
-        return getattr(
-            self.hf_config, "backbone_hidden_size", super().get_hidden_size()
-        )
-
-    def get_num_hidden_layers(self) -> int:
-        return getattr(self.hf_text_config, "num_hidden_layers", 0)
 
 
-class Gemma4ModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def is_mm_prefix_lm(self, supports_multimodal: bool = True) -> bool:
-        if not supports_multimodal:
-            return False
-        return (
-            getattr(self.hf_text_config, "use_bidirectional_attention", None)
-            == "vision"
-        )
-
-    def get_per_layer_hf_configs(
-        self,
-    ) -> list[tuple[PretrainedConfig, PretrainedConfig]] | None:
-        # Gemma4 uses a larger head dimension, and sometimes more KV heads, on its
-        # full attention layers than on its sliding ones. Transformers >= 5.15.0
-        # says so in the config; before that the values are flat attributes picked
-        # apart by `layer_types`, so build the per-layer configs here instead. Both
-        # then reach the base convertor as ordinary homogeneous configs.
-        if getattr(self.hf_text_config, "is_heterogeneous", False):
-            return super().get_per_layer_hf_configs()
-        text_config = self.hf_text_config
-        if not getattr(text_config, "layer_types", None):
-            return None
-        # `num_hidden_layers` is what the stack is built from, and it is what
-        # Transformers sizes `per_layer_config` by. `layer_types` can be longer,
-        # e.g. when a test truncates the layer count to build a small model.
-        return [
-            (self.hf_config, gemma4_layer_config(text_config, layer_idx))
-            for layer_idx in range(self.get_num_hidden_layers())
-        ]
 
 
-class MossAudioModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    def _language_config(self) -> PretrainedConfig:
-        return self.hf_config.language_config
-
-    def get_num_hidden_layers(self) -> int:
-        return getattr(self._language_config(), "num_hidden_layers", 0)
-
-    def get_total_num_attention_heads(self) -> int:
-        return getattr(self._language_config(), "num_attention_heads", 0)
-
-    def get_vocab_size(self) -> int:
-        return getattr(self._language_config(), "vocab_size", 0)
-
-    def get_hidden_size(self) -> int:
-        return getattr(self._language_config(), "hidden_size", 0)
-
-    def get_head_size(self) -> int:
-        head_dim = getattr(self._language_config(), "head_dim", None)
-        if head_dim is not None:
-            return head_dim
-        total_num_attention_heads = self.get_total_num_attention_heads()
-        if total_num_attention_heads == 0:
-            return 0
-        return self.get_hidden_size() // total_num_attention_heads
-
-    def get_total_num_kv_heads(self) -> int:
-        return getattr(
-            self._language_config(),
-            "num_key_value_heads",
-            self.get_total_num_attention_heads(),
-        )
-
-    def derive_max_model_len_and_key(self) -> tuple[float, str | None]:
-        language_config = self._language_config()
-        max_position_embeddings = getattr(
-            language_config,
-            "max_position_embeddings",
-            None,
-        )
-        if max_position_embeddings is None:
-            return super().derive_max_model_len_and_key()
-        return max_position_embeddings, "language_config.max_position_embeddings"
 
 
 # hf_config.model_type -> convertor class
 MODEL_ARCH_CONFIG_CONVERTORS = {
-    "bailing_hybrid_mtp": BailingHybridMTPModelArchConfigConvertor,
-    "cohere_asr": CohereAsrModelArchConfigConvertor,
-    "dbrx": DbrxModelArchConfigConvertor,
     "deepseek_mtp": DeepSeekMTPModelArchConfigConvertor,
-    "diffusion_gemma_text": Gemma4ModelArchConfigConvertor,
-    "ernie_mtp": ErnieMTPModelArchConfigConvertor,
-    "falcon": FalconModelArchConfigConvertor,
-    "falcon_mamba": MambaModelArchConfigConvertor,
-    "gemma4": Gemma4ModelArchConfigConvertor,
-    "gemma4_mtp": Gemma4MTPModelArchConfigConvertor,
-    "gemma4_text": Gemma4ModelArchConfigConvertor,
-    "gemma4_unified": Gemma4ModelArchConfigConvertor,
-    "gemma4_unified_text": Gemma4ModelArchConfigConvertor,
-    "glm4_moe_mtp": GLM4MoeMTPModelArchConfigConvertor,
-    "glm_ocr_mtp": GLM4MoeMTPModelArchConfigConvertor,
-    "longcat_flash_mtp": LongCatFlashMTPModelArchConfigConvertor,
-    "mamba": MambaModelArchConfigConvertor,
-    "medusa": MedusaModelArchConfigConvertor,
-    "mimo_mtp": MimoMTPModelArchConfigConvertor,
-    "mimo_v2": MimoV2ModelArchConfigConvertor,
-    "mimo_v2_flash": MimoV2ModelArchConfigConvertor,
-    "mimo_v2_mtp": MimoV2MTPModelArchConfigConvertor,
-    "mimo_v2_omni_mtp": MimoV2MTPModelArchConfigConvertor,
-    "moss_audio": MossAudioModelArchConfigConvertor,
-    "mpt": MPTModelArchConfigConvertor,
-    "nemotron-nas": NemotronNasModelArchConfigConvertor,
-    "bailing_hybrid_v3_mtp": BailingHybridV3MTPModelArchConfigConvertor,
-    "pangu_ultra_moe_mtp": PanguUltraMoeMTPModelArchConfigConvertor,
-    "qwen3_5_mtp": Qwen3_5MTPModelArchConfigConvertor,
-    "qwen3_next_mtp": Qwen3NextMTPModelArchConfigConvertor,
-    "RefinedWeb": FalconModelArchConfigConvertor,
-    "RefinedWebModel": FalconModelArchConfigConvertor,
-    "step3p5_mtp": Step3p5MTPModelArchConfigConvertor,
-    "timm_wrapper": TerratorchModelArchConfigConvertor,
-    "zamba2": Zamba2ModelArchConfigConvertor,
 }
