@@ -64,7 +64,7 @@ class LoadConfig:
         default=DEFAULT_SAFETENSORS_PREFETCH_BLOCK_SIZE, ge=1
     )
     """Read size in bytes for each safetensors checkpoint file prefetch."""
-    model_loader_extra_config: dict | TensorizerConfig = Field(default_factory=dict)
+    model_loader_extra_config: dict = Field(default_factory=dict)
     """Extra config for model loader. This will be passed to the model loader
     corresponding to the chosen load_format."""
     device: str | None = None

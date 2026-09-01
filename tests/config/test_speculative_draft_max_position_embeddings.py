@@ -92,25 +92,3 @@ def test_eagle_draft_inherits_target_max_model_len(
     draft_hf_config = speculative_config.draft_model_config.hf_config
     assert draft_hf_config.max_position_embeddings == target_model_config.max_model_len
     assert _override_logged(vllm_caplog)
-
-
-@pytest.mark.cpu_test
-def test_independent_draft_model_keeps_its_own_limit(
-    vllm_caplog: pytest.LogCaptureFixture,
-):
-    """An independent AR draft may genuinely have a smaller context than the
-    target; its max_position_embeddings must not be resized."""
-    target_model_config = ModelConfig(
-        AR_MODEL, hf_overrides={"max_position_embeddings": 8192}
-    )
-    assert target_model_config.max_model_len == 8192
-    speculative_config = SpeculativeConfig(
-        target_model_config=target_model_config,
-        target_parallel_config=ParallelConfig(),
-        model=AR_MODEL,
-        method="draft_model",
-        num_speculative_tokens=3,
-    )
-    draft_hf_config = speculative_config.draft_model_config.hf_config
-    assert draft_hf_config.max_position_embeddings == 2048
-    assert not _override_logged(vllm_caplog)

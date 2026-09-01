@@ -31,6 +31,7 @@ from .attention import AttentionConfig
 from .cache import CacheConfig
 from .compilation import CompilationConfig, CompilationMode, CUDAGraphMode
 from .device import DeviceConfig
+from .diffusion import DiffusionConfig
 from .ec_manager_config import EncoderCacheManagerConfig
 from .ec_transfer import ECTransferConfig
 from .kernel import KernelConfig
@@ -46,6 +47,7 @@ from .profiler import ProfilerConfig
 from .reasoning import ReasoningConfig
 from .scheduler import SchedulerConfig
 from .speculative import EagleModelTypes, NgramGPUTypes, SpeculativeConfig
+from .structured_outputs import StructuredOutputsConfig
 from .utils import SupportsHash, config, replace
 from .weight_transfer import WeightTransferConfig
 
@@ -348,6 +350,10 @@ class VllmConfig:
     """Kernel configuration."""
     speculative_config: SpeculativeConfig | None = None
     """Speculative decoding configuration."""
+    structured_outputs_config: StructuredOutputsConfig | None = None
+    """Structured outputs configuration. Unsupported in this build; always None."""
+    diffusion_config: DiffusionConfig | None = None
+    """Diffusion configuration. Unsupported in this build; always None."""
     observability_config: ObservabilityConfig = Field(
         default_factory=ObservabilityConfig
     )

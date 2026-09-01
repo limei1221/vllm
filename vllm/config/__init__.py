@@ -10,6 +10,7 @@ from vllm.config.compilation import (
     PassConfig,
 )
 from vllm.config.device import DeviceConfig
+from vllm.config.diffusion import DiffusionConfig
 from vllm.config.ec_manager_config import EncoderCacheManagerConfig
 from vllm.config.ec_transfer import ECTransferConfig
 from vllm.config.fault_tolerance import FaultToleranceConfig
@@ -39,6 +40,7 @@ from vllm.config.reasoning import ReasoningConfig
 from vllm.config.scheduler import SchedulerConfig
 from vllm.config.speculative import SpeculativeConfig
 from vllm.config.speech_to_text import SpeechToTextConfig, SpeechToTextParams
+from vllm.config.structured_outputs import StructuredOutputsConfig
 from vllm.config.utils import (
     ConfigType,
     SupportsMetricsInfo,
@@ -73,6 +75,7 @@ __all__ = [
     # From vllm.config.device
     "DeviceConfig",
     # From vllm.config.diffusion
+    "DiffusionConfig",
     # From vllm.config.ec_manager_config
     "EncoderCacheManagerConfig",
     # From vllm.config.ec_transfer
@@ -116,6 +119,7 @@ __all__ = [
     "SpeechToTextConfig",
     "SpeechToTextParams",
     # From vllm.config.structured_outputs
+    "StructuredOutputsConfig",
     # From vllm.config.profiler
     "ProfilerConfig",
     # From vllm.config.fault_tolerance

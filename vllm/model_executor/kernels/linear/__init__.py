@@ -256,8 +256,7 @@ _LINEAR_BACKEND_KERNEL_MAP: dict[str, set[type]] = {
         RowWiseTorchFP8ScaledMMLinearKernel,
         BlockWiseTorchFP8ScaledMMLinearKernel,
     },
-    "aiter": {
-    },
+    "aiter": set(),
     "machete": {
         MacheteLinearKernel,
     },
@@ -276,10 +275,8 @@ _LINEAR_BACKEND_KERNEL_MAP: dict[str, set[type]] = {
         EmulationMxfp6LinearKernel,
         EmulationMxfp4LinearKernel,
     },
-    "xpu": {
-    },
-    "xpu_woq": {
-    },
+    "xpu": set(),
+    "xpu_woq": set(),
 }
 
 

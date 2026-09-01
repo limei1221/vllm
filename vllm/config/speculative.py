@@ -692,10 +692,9 @@ class SpeculativeConfig:
             return
 
         if self.method is None:
-            self.method = "draft_model"
             raise ValueError(
-                f"This focused build only supports MTP or EAGLE speculative "
-                f"methods, got {self.method!r}."
+                "This focused build only supports MTP or EAGLE speculative "
+                "methods, but none was specified."
             )
 
         if self.model is None and self.num_speculative_tokens is not None:
@@ -739,9 +738,6 @@ class SpeculativeConfig:
                 raise ValueError(
                     "num_speculative_tokens was provided but without speculative model."
                 )
-
-        if self.method in ("ngram", "[ngram]"):
-            self.method = "ngram"
 
         if self.method in ("ngram", "ngram_gpu"):
             # Set default values if not provided
@@ -886,22 +882,6 @@ class SpeculativeConfig:
                     self.method = "eagle"
                 elif "eagle3" in self.draft_model_config.model.lower():
                     self.method = "eagle3"
-                elif (
-                    "dflash" in self.draft_model_config.model.lower()
-                    or "MuseGlimmerAssistantModel"
-                    in self.draft_model_config.architectures
-                ):
-                    self.method = "dflash"
-                elif (
-                    "dspark" in self.draft_model_config.model.lower()
-                    or "Qwen3DSparkModel" in self.draft_model_config.architectures
-                    or "Gemma4DSparkModel" in self.draft_model_config.architectures
-                ):
-                    self.method = "dspark"
-                elif self.draft_model_config.hf_config.model_type == "medusa":
-                    self.method = "medusa"
-                elif self.draft_model_config.hf_config.model_type == "mlp_speculator":
-                    self.method = "mlp_speculator"
                 elif self.draft_model_config.hf_config.model_type in get_args(
                     MTPModelTypes
                 ):
@@ -916,8 +896,6 @@ class SpeculativeConfig:
                             "multiple times of forward on same MTP layer"
                             ",which may result in lower acceptance rate"
                         )
-                elif self.method == "draft_model":
-                    pass
                 else:
                     raise NotImplementedError(
                         f"Unsupported speculative method: '{self.method}'"

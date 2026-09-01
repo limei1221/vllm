@@ -25,10 +25,23 @@ def get_model(
     vllm_config: VllmConfig,
     model_config: ModelConfig | None = None,
     prefix: str = "",
+    load_config: LoadConfig | None = None,
 ) -> nn.Module:
+    """Load a model with the safetensors loader.
+
+    Args:
+        vllm_config: The engine configuration.
+        model_config: Model to load; defaults to the engine's own model.
+        prefix: Weight-name prefix for the loaded module.
+        load_config: Loader settings; defaults to the engine's own. Draft
+            models pass their own so they resolve their own checkpoint.
+
+    Returns:
+        The loaded model.
+    """
     if model_config is None:
         model_config = vllm_config.model_config
-    return SafetensorsModelLoader(vllm_config.load_config).load_model(
+    return SafetensorsModelLoader(load_config or vllm_config.load_config).load_model(
         vllm_config=vllm_config,
         model_config=model_config,
         prefix=prefix,

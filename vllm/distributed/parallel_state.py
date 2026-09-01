@@ -33,7 +33,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from multiprocessing import shared_memory
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 from unittest.mock import patch
 
 import torch
@@ -48,7 +48,6 @@ from vllm.distributed.device_communicators.base_device_communicator import (
 )
 from vllm.distributed.utils import (
     StatelessProcessGroup,
-    get_cached_tcp_store_client,
 )
 from vllm.logger import init_logger
 from vllm.utils.import_utils import resolve_obj_by_qualname
@@ -57,9 +56,6 @@ from vllm.utils.system_utils import suppress_stdout
 from vllm.utils.torch_utils import (
     direct_register_custom_op,
 )
-
-if TYPE_CHECKING:
-    from vllm.distributed.stateless_coordinator import StatelessGroupCoordinator
 
 
 @dataclass
@@ -1332,33 +1328,6 @@ def init_model_parallel_group(
     )
 
 
-def _init_stateless_group(
-    group_ranks: list[list[int]],
-    group_name: str,
-    host: str,
-    backend: str,
-    coord_store: Store,
-    use_device_communicator: bool = True,
-    use_all2all: bool = False,
-) -> "StatelessGroupCoordinator":
-    """Create a StatelessGroupCoordinator with the given parameters."""
-    from vllm.distributed.stateless_coordinator import StatelessGroupCoordinator
-
-    world = get_world_group()
-    return StatelessGroupCoordinator(
-        group_ranks=group_ranks,
-        local_rank=world.local_rank,
-        torch_distributed_backend=backend,
-        use_device_communicator=use_device_communicator,
-        group_name=group_name,
-        host=host,
-        coord_store=coord_store,
-        global_rank=world.rank,
-        global_world_size=world.world_size,
-        use_all2all=use_all2all,
-    )
-
-
 def _replace_active_groups(
     *,
     world: GroupCoordinator | None,
@@ -1548,41 +1517,6 @@ def _validate_default_pg_for_split_group() -> None:
         ) from e
 
 
-def _init_elastic_ep_world(
-    config, local_rank: int, backend: str, rank: int, world_size: int
-) -> None:
-    from vllm.distributed.stateless_coordinator import StatelessGroupCoordinator
-
-    global _WORLD, _NODE_COUNT
-    assert _WORLD is None, "world group already initialized"
-    parallel_config = config.parallel_config
-    global_rank = parallel_config.data_parallel_rank * world_size + rank
-    global_world_size = parallel_config.world_size_across_dp
-    all_ranks = list(range(global_world_size))
-    group_ranks = [all_ranks[i : i + 1] for i in range(global_world_size)]
-    if global_rank in all_ranks:
-        group_ranks = [all_ranks]
-    coord_store = get_cached_tcp_store_client(
-        parallel_config.data_parallel_master_ip, parallel_config._coord_store_port
-    )
-    world = StatelessGroupCoordinator(
-        group_ranks=group_ranks,
-        local_rank=local_rank,
-        torch_distributed_backend=backend,
-        use_device_communicator=False,
-        group_name="world",
-        host=parallel_config.data_parallel_master_ip,
-        coord_store=coord_store,
-        global_rank=global_rank,
-        global_world_size=global_world_size,
-    )
-    assert parallel_config.nnodes_within_dp == 1, (
-        "Elastic EP is not supported with multi-node TP/PP"
-    )
-    _NODE_COUNT = _node_count(world.tcp_store_group)
-    _WORLD = world
-
-
 def init_distributed_environment(
     world_size: int = -1,
     rank: int = -1,
@@ -1602,7 +1536,6 @@ def init_distributed_environment(
     from vllm.config import get_current_vllm_config_or_none
 
     config = get_current_vllm_config_or_none()
-    enable_elastic_ep = config is not None and config.parallel_config.enable_elastic_ep
     if (
         config is not None
         and config.parallel_config.distributed_executor_backend != "external_launcher"
@@ -1610,7 +1543,6 @@ def init_distributed_environment(
             config.parallel_config.nnodes > 1
             or config.parallel_config.data_parallel_size > 1
         )
-        and not enable_elastic_ep
     ):
         parallel_config = config.parallel_config
         # adjust to take into account data parallelism
@@ -1690,18 +1622,6 @@ def init_distributed_environment(
                 rank=rank,
                 timeout=timeout,
             )
-        if enable_elastic_ep:
-            tp_pp_cpu_group = torch.distributed.new_group(
-                backend="gloo", timeout=timeout
-            )
-            if _node_count(tp_pp_cpu_group) > 1:
-                # NOTE(yongji): StatelessGroupCoordinator uses data_parallel_master_ip
-                # to initialize all DP/EP groups, hence all ranks within TP/PP group
-                # must reside on the same node
-                raise RuntimeError(
-                    "Elastic EP is not yet supported with multi-node TP/PP"
-                )
-
     if envs.VLLM_DISTRIBUTED_USE_SPLIT_GROUP and torch.accelerator.is_available():
         _validate_default_pg_for_split_group()
 
@@ -1714,9 +1634,6 @@ def init_distributed_environment(
         local_rank = envs.LOCAL_RANK if distributed_init_method == "env://" else rank
 
     global _WORLD, _NODE_COUNT, _INNER_DP_WORLD
-    if enable_elastic_ep:
-        _init_elastic_ep_world(config, local_rank, backend, rank, world_size)
-        return
     if _WORLD is None:
         ranks = list(range(torch.distributed.get_world_size()))
         _WORLD = init_world_group(ranks, local_rank, backend)
@@ -1785,34 +1702,10 @@ def initialize_model_parallel(
 
     config = get_current_vllm_config()
     data_parallel_size = config.parallel_config.data_parallel_size
-    enable_elastic_ep = config.parallel_config.enable_elastic_ep
     parallel_config = config.parallel_config
-    coord_store: Store | None = None
-    if enable_elastic_ep:
-        coord_store = get_cached_tcp_store_client(
-            parallel_config.data_parallel_master_ip,
-            parallel_config._coord_store_port,
-        )
-        # Use stateless world group for global information
-        world_size = get_world_group().world_size
-        rank = get_world_group().rank
-        backend = backend or "nccl"
-        tp_pp_pcp_size = (
-            tensor_model_parallel_size
-            * pipeline_model_parallel_size
-            * prefill_context_model_parallel_size
-        )
-        local_all_ranks = torch.arange(tp_pp_pcp_size).reshape(
-            pipeline_model_parallel_size,
-            prefill_context_model_parallel_size,
-            tensor_model_parallel_size,
-        )
-    else:
-        world_size = torch.distributed.get_world_size()
-        rank = torch.distributed.get_rank()
-        backend = backend or torch.distributed.get_backend(
-            get_world_group().device_group
-        )
+    world_size = torch.distributed.get_world_size()
+    rank = torch.distributed.get_rank()
+    backend = backend or torch.distributed.get_backend(get_world_group().device_group)
 
     # the layout order is: ExternalDP x DP x PP x PCP x TP
     # ExternalDP is the data parallel group that is not part of the model,
@@ -1836,9 +1729,6 @@ def initialize_model_parallel(
     assert _TP is None, "tensor model parallel group is already initialized"
     group_ranks = all_ranks.view(-1, tensor_model_parallel_size).unbind(0)
     group_ranks = [x.tolist() for x in group_ranks]
-    if enable_elastic_ep:
-        group_ranks = local_all_ranks.view(-1, tensor_model_parallel_size).unbind(0)
-        group_ranks = [x.tolist() for x in group_ranks]
     # message queue broadcaster is only used in tensor model parallel group
     _TP = init_model_parallel_group(
         group_ranks,
@@ -1852,7 +1742,7 @@ def initialize_model_parallel(
     global _DCP
     assert _DCP is None, "decode context model parallel group is already initialized"
     dcp_size = decode_context_model_parallel_size or 1
-    dcp_ranks = local_all_ranks if enable_elastic_ep else all_ranks
+    dcp_ranks = all_ranks
     if dcp_size > 1:
         # DCP spans PCP first, then TP for full TP x PCP groups.
         dcp_ranks = dcp_ranks.transpose(-1, -2)
@@ -1874,13 +1764,6 @@ def initialize_model_parallel(
         .unbind(0)
     )
     group_ranks = [x.tolist() for x in group_ranks]
-    if enable_elastic_ep:
-        group_ranks = (
-            local_all_ranks.transpose(1, 2)
-            .reshape(-1, prefill_context_model_parallel_size)
-            .unbind(0)
-        )
-        group_ranks = [x.tolist() for x in group_ranks]
     _PCP = init_model_parallel_group(
         group_ranks, get_world_group().local_rank, backend, group_name="pcp"
     )
@@ -1892,13 +1775,6 @@ def initialize_model_parallel(
         all_ranks.transpose(2, 4).reshape(-1, pipeline_model_parallel_size).unbind(0)
     )
     group_ranks = [x.tolist() for x in group_ranks]
-    if enable_elastic_ep:
-        group_ranks = (
-            local_all_ranks.transpose(0, 2)
-            .reshape(-1, pipeline_model_parallel_size)
-            .unbind(0)
-        )
-        group_ranks = [x.tolist() for x in group_ranks]
     _PP = init_model_parallel_group(
         group_ranks, get_world_group().local_rank, backend, group_name="pp"
     )
@@ -1907,18 +1783,9 @@ def initialize_model_parallel(
     assert _DP is None, "data parallel group is already initialized"
     group_ranks = all_ranks.transpose(1, 4).reshape(-1, data_parallel_size).unbind(0)
     group_ranks = [x.tolist() for x in group_ranks]
-    if enable_elastic_ep:
-        _DP = _init_stateless_group(
-            group_ranks,
-            "dp",
-            parallel_config.data_parallel_master_ip,
-            backend,
-            coord_store=coord_store,
-        )
-    else:
-        _DP = init_model_parallel_group(
-            group_ranks, get_world_group().local_rank, backend, group_name="dp"
-        )
+    _DP = init_model_parallel_group(
+        group_ranks, get_world_group().local_rank, backend, group_name="dp"
+    )
 
     global _EP
     assert _EP is None, "expert parallel group is already initialized"
@@ -1936,23 +1803,13 @@ def initialize_model_parallel(
         )
         group_ranks = [x.tolist() for x in group_ranks]
         use_all2all = parallel_config.use_all2all
-        if enable_elastic_ep:
-            _EP = _init_stateless_group(
-                group_ranks,
-                "ep",
-                parallel_config.data_parallel_master_ip,
-                backend,
-                coord_store=coord_store,
-                use_all2all=use_all2all,
-            )
-        else:
-            _EP = init_model_parallel_group(
-                group_ranks,
-                get_world_group().local_rank,
-                backend,
-                group_name="ep",
-                use_all2all=use_all2all,
-            )
+        _EP = init_model_parallel_group(
+            group_ranks,
+            get_world_group().local_rank,
+            backend,
+            group_name="ep",
+            use_all2all=use_all2all,
+        )
 
         # Create EPLB group with the same ranks as EP if EPLB is enabled.
         # This is a separate process group to isolate EPLB communications
@@ -1961,21 +1818,12 @@ def initialize_model_parallel(
         global _EPLB
         assert _EPLB is None, "EPLB group is already initialized"
         if config.parallel_config.enable_eplb:
-            if enable_elastic_ep:
-                _EPLB = _init_stateless_group(
-                    group_ranks,
-                    "eplb",
-                    parallel_config.data_parallel_master_ip,
-                    backend,
-                    coord_store=coord_store,
-                )
-            else:
-                _EPLB = init_model_parallel_group(
-                    group_ranks,
-                    get_world_group().local_rank,
-                    backend,
-                    group_name="eplb",
-                )
+            _EPLB = init_model_parallel_group(
+                group_ranks,
+                get_world_group().local_rank,
+                backend,
+                group_name="eplb",
+            )
     # If no EP group needed, _EP remains None
     # If no EPLB group needed, _EPLB remains None
 

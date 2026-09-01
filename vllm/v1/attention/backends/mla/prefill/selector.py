@@ -4,9 +4,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
+
+import torch
 
 from vllm.logger import init_logger
+from vllm.v1.attention.backends.mla.prefill.base import MLADimensions
 
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
@@ -15,9 +18,26 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 
 
+class MLAPrefillSelectorConfig(NamedTuple):
+    """Hashable configuration for MLA prefill backend selection."""
+
+    dtype: torch.dtype
+    mla_dimensions: MLADimensions = MLADimensions(
+        qk_nope_head_dim=0,
+        qk_rope_head_dim=0,
+        v_head_dim=0,
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"MLAPrefillSelectorConfig(dtype={self.dtype}, "
+            f"mla_dimensions={self.mla_dimensions})"
+        )
+
+
 def get_mla_prefill_backend(
-    vllm_config: "VllmConfig",
-) -> "type[MLAPrefillBackend]":
+    vllm_config: VllmConfig,
+) -> type[MLAPrefillBackend]:
     """Return the FlashAttention MLA prefill backend.
 
     This focused build always uses FlashAttention for prefill on Hopper.

@@ -7,7 +7,7 @@ from __future__ import annotations
 import importlib
 from collections.abc import Set
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch.nn as nn
 
@@ -52,12 +52,9 @@ def resolve_deepseek_model_class(architecture: str) -> type[nn.Module]:
         module_name, class_name = SUPPORTED_MODELS[architecture]
     except KeyError as exc:
         raise ValueError(
-            f"Unsupported architecture {architecture!r}; "
-            f"expected DeepSeek V2/V3"
+            f"Unsupported architecture {architecture!r}; expected DeepSeek V2/V3"
         ) from exc
-    module = importlib.import_module(
-        f"vllm.model_executor.models.{module_name}"
-    )
+    module = importlib.import_module(f"vllm.model_executor.models.{module_name}")
     return getattr(module, class_name)
 
 
@@ -82,13 +79,26 @@ class _ModelInfo:
 
 
 @dataclass
-class ModelRegistry:
+class _ModelRegistry:
     """Registry of supported model architectures."""
 
     models: dict[str, type[nn.Module]] = field(default_factory=dict)
 
     def get_supported_archs(self) -> Set[str]:
         return SUPPORTED_ARCHITECTURES
+
+    def _normalize_arch(
+        self,
+        architecture: str,
+        model_config: ModelConfig | None = None,
+    ) -> str:
+        """Return the registered name for ``architecture``.
+
+        The focused registry keys on the HuggingFace architecture name
+        directly, so no remapping is needed.
+        """
+        del model_config
+        return architecture
 
     def register_model(
         self,
@@ -111,9 +121,7 @@ class ModelRegistry:
         if isinstance(model_cls, str):
             split_str = model_cls.split(":")
             if len(split_str) != 2:
-                raise ValueError(
-                    "Expected a string in the format `<module>:<class>`"
-                )
+                raise ValueError("Expected a string in the format `<module>:<class>`")
             module = importlib.import_module(split_str[0])
             model_cls = getattr(module, split_str[1])
         if not (isinstance(model_cls, type) and issubclass(model_cls, nn.Module)):
@@ -122,9 +130,7 @@ class ModelRegistry:
             )
         self.models[model_arch] = model_cls
 
-    def _resolve(
-        self, architectures: str | list[str]
-    ) -> tuple[type[nn.Module], str]:
+    def _resolve(self, architectures: str | list[str]) -> tuple[type[nn.Module], str]:
         if isinstance(architectures, str):
             architectures = [architectures]
         if not architectures:
@@ -144,14 +150,14 @@ class ModelRegistry:
     def resolve_model_cls(
         self,
         architectures: str | list[str],
-        model_config: "ModelConfig | None" = None,
+        model_config: ModelConfig | None = None,
     ) -> tuple[type[nn.Module], str]:
         return self._resolve(architectures)
 
     def inspect_model_cls(
         self,
         architectures: str | list[str],
-        model_config: "ModelConfig | None" = None,
+        model_config: ModelConfig | None = None,
     ) -> tuple[_ModelInfo, str]:
         _, arch = self._resolve(architectures)
         return _ModelInfo(architecture=arch), arch
@@ -159,79 +165,79 @@ class ModelRegistry:
     def is_text_generation_model(
         self,
         architectures: str | list[str],
-        model_config: "ModelConfig | None" = None,
+        model_config: ModelConfig | None = None,
     ) -> bool:
         return True
 
     def is_pooling_model(
         self,
         architectures: str | list[str],
-        model_config: "ModelConfig | None" = None,
+        model_config: ModelConfig | None = None,
     ) -> bool:
         return False
 
     def is_multimodal_model(
         self,
         architectures: str | list[str],
-        model_config: "ModelConfig | None" = None,
+        model_config: ModelConfig | None = None,
     ) -> bool:
         return False
 
     def is_multimodal_raw_input_only_model(
         self,
         architectures: str | list[str],
-        model_config: "ModelConfig | None" = None,
+        model_config: ModelConfig | None = None,
     ) -> bool:
         return False
 
     def is_pp_supported_model(
         self,
         architectures: str | list[str],
-        model_config: "ModelConfig | None" = None,
+        model_config: ModelConfig | None = None,
     ) -> bool:
         return True
 
     def model_has_inner_state(
         self,
         architectures: str | list[str],
-        model_config: "ModelConfig | None" = None,
+        model_config: ModelConfig | None = None,
     ) -> bool:
         return False
 
     def is_attention_free_model(
         self,
         architectures: str | list[str],
-        model_config: "ModelConfig | None" = None,
+        model_config: ModelConfig | None = None,
     ) -> bool:
         return False
 
     def is_hybrid_model(
         self,
         architectures: str | list[str],
-        model_config: "ModelConfig | None" = None,
+        model_config: ModelConfig | None = None,
     ) -> bool:
         return False
 
     def is_noops_model(
         self,
         architectures: str | list[str],
-        model_config: "ModelConfig | None" = None,
+        model_config: ModelConfig | None = None,
     ) -> bool:
         return False
 
     def is_transcription_model(
         self,
         architectures: str | list[str],
-        model_config: "ModelConfig | None" = None,
+        model_config: ModelConfig | None = None,
     ) -> bool:
         return False
 
     def is_transcription_only_model(
         self,
         architectures: str | list[str],
-        model_config: "ModelConfig | None" = None,
+        model_config: ModelConfig | None = None,
     ) -> bool:
         return False
 
 
-ModelRegistry = ModelRegistry()
+ModelRegistry = _ModelRegistry()

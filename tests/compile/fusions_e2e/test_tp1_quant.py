@@ -19,8 +19,6 @@ from .models import (
     FLASHINFER_ATTN,
     FLASHINFER_MLA_ATTN,
     FLASHMLA_SPARSE_ATTN,
-    ROCM_AITER_UNIFIED_ATTN,
-    ROCM_ATTN,
     TRITON_ATTN,
     TRITON_MLA_ATTN,
     deepseek_coder_v2_lite_fp8,
@@ -59,8 +57,6 @@ from .models import (
     [
         TRITON_ATTN,
         FLASHINFER_ATTN,
-        ROCM_ATTN,
-        ROCM_AITER_UNIFIED_ATTN,
         FLASHINFER_MLA_ATTN,
         TRITON_MLA_ATTN,
     ],

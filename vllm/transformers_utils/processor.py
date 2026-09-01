@@ -25,7 +25,6 @@ from transformers.video_utils import VideoInput
 from typing_extensions import TypeVar
 
 from vllm.logger import init_logger
-from vllm.transformers_utils import processors
 from vllm.transformers_utils.repo_utils import get_hf_file_to_dict
 from vllm.transformers_utils.utils import convert_model_repo_to_path
 from vllm.utils.func_utils import get_allowed_kwarg_only_overrides
@@ -224,12 +223,9 @@ def get_processor(
         registered_cls_name = get_processor_cls_name_from_config(
             processor_name, revision=revision
         )
-        registered_processor_cls = (
-            getattr(processors, registered_cls_name, None)
-            if registered_cls_name
-            else None
-        )
-        registered_processor_cls = cast(type[_P] | None, registered_processor_cls)
+        # This build ships no vLLM-provided processor classes.
+        del registered_cls_name
+        registered_processor_cls: type[_P] | None = None
         # Use registered processor class when it's available
         # and explicit processor_cls is not set.
         if isinstance(processor_cls, tuple) or processor_cls == ProcessorMixin:

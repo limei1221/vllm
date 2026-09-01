@@ -11,17 +11,14 @@ import contextlib
 import multiprocessing
 import os
 import signal
+from collections.abc import Iterable
 from functools import partial
 from http import HTTPStatus
 from multiprocessing.process import BaseProcess
-from typing import Iterable
 
 import uvicorn
-import uvloop
 from fastapi import FastAPI, Response
 
-import vllm.envs as envs
-from vllm.entrypoints.launcher import NoSignalServer
 from vllm.logger import init_logger
 from vllm.utils.system_utils import (
     decorate_logs,
@@ -80,7 +77,7 @@ class DPSupervisor:
         self._is_ready = False
         self._processes: list[BaseProcess] = []
         self._shutdown_event = asyncio.Event()
-        self._shutdown_signal = signal.SIGTERM
+        self._shutdown_signal: int = int(signal.SIGTERM)
         self._router: LocalDPRouter | None = None
 
     @property
@@ -141,9 +138,7 @@ class DPSupervisor:
                 child_args.port,
             )
 
-        self._router = LocalDPRouter(
-            f"localhost:{port}" for port in self.child_ports
-        )
+        self._router = LocalDPRouter(f"localhost:{port}" for port in self.child_ports)
 
     async def _monitor_children(self) -> None:
         """Monitor child process health; set shutdown event if any dies."""
@@ -169,12 +164,15 @@ class DPSupervisor:
             all_ready = True
             for port in self.child_ports:
                 try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(
-                            f"http://localhost:{port}/health", timeout=aiohttp.ClientTimeout(total=2)
-                        ) as resp:
-                            if resp.status != 200:
-                                all_ready = False
+                    async with (
+                        aiohttp.ClientSession() as session,
+                        session.get(
+                            f"http://localhost:{port}/health",
+                            timeout=aiohttp.ClientTimeout(total=2),
+                        ) as resp,
+                    ):
+                        if resp.status != 200:
+                            all_ready = False
                 except Exception:
                     all_ready = False
                     break
@@ -200,23 +198,23 @@ class DPSupervisor:
         async def proxy(path: str, request: dict):
             assert self._router is not None
             engine = self._router.next_engine()
-            port = self._router._engines[
-                self._router._index % len(self._router._engines)
-            ].split(":")[1]
+            port = engine.split(":")[1]
             # Forward to the selected engine
             import aiohttp
 
-            async with aiohttp.ClientSession() as session:
-                async with session.request(
+            async with (
+                aiohttp.ClientSession() as session,
+                session.request(
                     method=request.get("method", "GET"),
                     url=f"http://localhost:{port}/{path}",
                     json=request.get("body"),
-                ) as resp:
-                    return Response(
-                        content=await resp.read(),
-                        status_code=resp.status,
-                        headers=dict(resp.headers),
-                    )
+                ) as resp,
+            ):
+                return Response(
+                    content=await resp.read(),
+                    status_code=resp.status,
+                    headers=dict(resp.headers),
+                )
 
         config = uvicorn.Config(
             app,
@@ -231,7 +229,7 @@ class DPSupervisor:
     def _shutdown_children(self) -> None:
         """Terminate all child processes."""
         for proc in self._processes:
-            if proc.is_alive():
+            if proc.is_alive() and proc.pid is not None:
                 kill_process_tree(proc.pid)
         self._processes.clear()
 
@@ -254,4 +252,21 @@ def _run_child(args: argparse.Namespace) -> None:
     from vllm.entrypoints.openai.api_server import run_server
 
     os.environ["VLLM_DP_RANK"] = str(args.data_parallel_rank)
-    run_server(args)
+    asyncio.run(run_server(args))
+
+
+def validate_multi_port_external_lb_args(args: argparse.Namespace) -> None:
+    """Reject multi-port external load balancing.
+
+    External and hybrid DP load balancing are not supported by this build;
+    `ParallelConfig` rejects them as well.
+    """
+    del args
+    raise NotImplementedError(
+        "Multi-port external load balancing is not supported by this build."
+    )
+
+
+def run_dp_supervisor(args: argparse.Namespace) -> None:
+    """Run local data-parallel servers under a supervising process."""
+    asyncio.run(DPSupervisor(args).run())

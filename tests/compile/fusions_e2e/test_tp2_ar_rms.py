@@ -19,8 +19,6 @@ from .models import (
     FLASHINFER_ATTN,
     FLASHINFER_MLA_ATTN,
     FLASHMLA_SPARSE_ATTN,
-    ROCM_AITER_UNIFIED_ATTN,
-    ROCM_ATTN,
     TRITON_ATTN,
     deepseek_coder_v2_lite_fp8,
     deepseek_r1_fp4,
@@ -194,8 +192,6 @@ def test_tp2_ar_rms_fp4_fusions(
     [
         TRITON_ATTN,
         FLASHINFER_ATTN,
-        ROCM_ATTN,
-        ROCM_AITER_UNIFIED_ATTN,
     ],
 )
 @pytest.mark.parametrize("n_layers", [4])
