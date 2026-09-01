@@ -2014,17 +2014,6 @@ class EngineArgs:
             kv_offloading_backend=self.kv_offloading_backend,
         )
 
-        if resolved_cache_dtype.startswith("turboquant_"):
-            from vllm.model_executor.layers.quantization.turboquant.config import (
-                TurboQuantConfig,
-            )
-
-            boundary = TurboQuantConfig.get_boundary_skip_layers(model_config)
-            existing = set(cache_config.kv_cache_dtype_skip_layers)
-            cache_config.kv_cache_dtype_skip_layers = sorted(
-                existing | set(boundary), key=int
-            )
-
         ray_runtime_env = None
         if is_ray_initialized():
             # Ray Serve LLM calls `create_engine_config` in the context

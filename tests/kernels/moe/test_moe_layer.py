@@ -53,10 +53,6 @@ from vllm.model_executor.layers.fused_moe.router.router_factory import (
     create_fused_moe_router,
 )
 from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
-from vllm.model_executor.layers.quantization.modelopt import (
-    ModelOptFp8Config,
-    ModelOptNvFp4Config,
-)
 from vllm.model_executor.models.utils import sequence_parallel_chunk
 from vllm.platforms import current_platform
 from vllm.utils.flashinfer import (
@@ -119,21 +115,19 @@ QUANT_METHODS = [
     None,
     "fp8",
     "fp8_blocked",
-    "modelopt_fp8",
-    "modelopt_fp4",
 ]
 
 # Which quantization methods each backend supports.
 # fmt: off
 BACKEND_SUPPORTED_QUANTS: dict[str, set[str | None]] = {
-    "allgather_reducescatter":     {None,         "fp8", "modelopt_fp8", "modelopt_fp4"}, # noqa: E501
-    "mori_high_throughput":        {None,         "fp8", "modelopt_fp8"},
-    "mori_low_latency":            {None,         "fp8", "modelopt_fp8"},
-    "flashinfer_nvlink_two_sided": {None, "fp8_blocked",                 "modelopt_fp4"}, # noqa: E501
-    "flashinfer_nvlink_one_sided": {None,                                "modelopt_fp4"}, # noqa: E501
-    "deepep_low_latency":          {None, "fp8_blocked",                 "modelopt_fp4"}, # noqa: E501
-    "deepep_high_throughput":      {None, "fp8_blocked", "modelopt_fp8", "modelopt_fp4"}, # noqa: E501
-    "nixl_ep":                     {None, "fp8_blocked", "modelopt_fp8"},
+    "allgather_reducescatter":     {None,         "fp8"}, # noqa: E501
+    "mori_high_throughput":        {None,         "fp8"},
+    "mori_low_latency":            {None,         "fp8"},
+    "flashinfer_nvlink_two_sided": {None, "fp8_blocked"}, # noqa: E501
+    "flashinfer_nvlink_one_sided": {None}, # noqa: E501
+    "deepep_low_latency":          {None, "fp8_blocked"}, # noqa: E501
+    "deepep_high_throughput":      {None, "fp8_blocked"}, # noqa: E501
+    "nixl_ep":                     {None, "fp8_blocked"},
 }
 
 # Map from backend -> (DP/EP support, DP support, TP support, SP support)
@@ -714,59 +708,6 @@ def make_quant_config(
         return Fp8Config(True, weight_block_size=block_shape), _quantize_fp8_halves(
             w1, w2, block_shape
         )
-
-    if quantization == "modelopt_fp8":
-        qw = _quantize_fp8_halves(w1, w2)
-        # why?
-        qw.w13_input_scale = torch.ones(
-            num_experts, dtype=torch.float32, device=w1.device
-        )
-        # why?
-        qw.w2_input_scale = torch.ones(
-            num_experts, dtype=torch.float32, device=w2.device
-        )
-        quant_config = ModelOptFp8Config(
-            quant_method="FP8",
-            is_checkpoint_fp8_serialized=True,
-            kv_cache_quant_method=None,
-            exclude_modules=[],
-        )
-        return quant_config, qw
-
-    if quantization == "modelopt_fp4":
-        # Quantize full w13 at once so both gate/up halves share the same
-        # global scale per expert.  process_weights_after_loading uses
-        # w13_weight_scale_2[:, 0] for the entire tensor, so the two shard
-        # scales must match.
-        w1q, w1s, w1gs = moe_quantize_weights(w1, None, "nvfp4", False, None)
-        assert w1s is not None and w1gs is not None
-
-        w2q, w2s, w2gs = moe_quantize_weights(w2, None, "nvfp4", False, None)
-        assert w2s is not None and w2gs is not None
-
-        qw = QuantizedWeights(
-            w13_weight=w1q,
-            w2_weight=w2q,
-            w13_weight_scale=w1s,
-            w2_weight_scale=w2s,
-            # weight_scale_2 = 1/w_gs: the kernel computes
-            # g_alphas = a_scale * w_scale_2, and correct dequant needs 1/w_gs.
-            # Expand per-expert scalar to (E, 2) for the two shards.
-            w13_weight_scale_2=(1.0 / w1gs).unsqueeze(1).expand(-1, 2).contiguous(),
-            w2_weight_scale_2=1.0 / w2gs,
-            w13_input_scale=torch.ones(
-                (num_experts, 2), dtype=torch.float32, device=w1.device
-            ),
-            w2_input_scale=torch.ones(
-                num_experts, dtype=torch.float32, device=w2.device
-            ),
-        )
-        quant_config = ModelOptNvFp4Config(
-            is_checkpoint_nvfp4_serialized=True,
-            kv_cache_quant_algo=None,
-            exclude_modules=[],
-        )
-        return quant_config, qw
 
     raise NotImplementedError(f"Unsupported quantization: {quantization}")
 

@@ -496,12 +496,6 @@ def awq_dequantize(
     thx: int,
     thy: int,
 ) -> torch.Tensor:
-    if envs.VLLM_USE_TRITON_AWQ:
-        from vllm.model_executor.layers.quantization.awq_triton import (
-            awq_dequantize_triton,
-        )
-
-        return awq_dequantize_triton(qweight, scales, zeros)
     return torch.ops._C.awq_dequantize(qweight, scales, zeros, split_k_iters, thx, thy)
 
 
@@ -529,10 +523,6 @@ def awq_gemm(
     qzeros: torch.Tensor,
     split_k_iters: int,
 ) -> torch.Tensor:
-    if envs.VLLM_USE_TRITON_AWQ:
-        from vllm.model_executor.layers.quantization.awq_triton import awq_gemm_triton
-
-        return awq_gemm_triton(input, qweight, scales, qzeros, split_k_iters)
     return torch.ops._C.awq_gemm(input, qweight, scales, qzeros, split_k_iters)
 
 
@@ -791,7 +781,7 @@ def cutlass_scaled_mm(
     a = a.view(-1, a.shape[-1])
 
     cutlass_compatible_b = b.shape[0] % 16 == 0 and b.shape[1] % 16 == 0
-    if current_platform.is_rocm() or not cutlass_compatible_b:
+    if not cutlass_compatible_b:
         from vllm.model_executor.layers.quantization.compressed_tensors.triton_scaled_mm import (  # noqa
             triton_scaled_mm,
         )

@@ -60,7 +60,6 @@ except ImportError:
     fastsafetensors = PlaceholderModule("fastsafetensors")
     SingleGroup = fastsafetensors.placeholder_attr("SingleGroup")
 
-from vllm.model_executor.layers.quantization.torchao import torchao_version_at_least
 
 logger = init_logger(__name__)
 
@@ -317,15 +316,6 @@ def get_quant_config(
 
     # Online quantization doesn't read from checkpoint configs - it quantizes
     # fp16/bf16 weights on the fly during loading.
-    if model_config.quantization_config is not None:
-        from vllm.config.quantization import QuantizationConfigArgs
-        from vllm.model_executor.layers.quantization.online.base import (
-            OnlineQuantizationConfig,
-        )
-
-        assert isinstance(model_config.quantization_config, QuantizationConfigArgs)
-        return OnlineQuantizationConfig(args=model_config.quantization_config)
-
     model_name_or_path = (
         maybe_download_from_modelscope(
             model_config.model,
@@ -927,7 +917,7 @@ def safetensors_weights_iterator(
         elif safetensors_load_strategy == "torchao":
             # we can't load flattened torchao tensor subclasses directly into the model
             # instead we reconstruct the subclasses here before returning
-            if not torchao_version_at_least("0.15.0"):
+            if True:
                 raise ValueError(
                     "Please use torchao version >= 0.15.0 "
                     "to load torchao safetensors checkpoint"

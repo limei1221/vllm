@@ -183,18 +183,9 @@ class Fp8Config(QuantizationConfig):
                 match_mode=self.ignored_layers_match_mode,
             ):
                 return UnquantizedLinearMethod()
-            if not self.is_checkpoint_fp8_serialized:
-                from vllm.model_executor.layers.quantization.online.fp8 import (
-                    Fp8PerTensorOnlineLinearMethod,
-                )
-
-                online_method = Fp8PerTensorOnlineLinearMethod()
-                online_method.marlin_input_dtype = get_marlin_input_dtype(prefix)
-                return online_method
-            else:
-                offline_method = Fp8LinearMethod(self)
-                offline_method.marlin_input_dtype = get_marlin_input_dtype(prefix)
-                return offline_method
+            offline_method = Fp8LinearMethod(self)
+            offline_method.marlin_input_dtype = get_marlin_input_dtype(prefix)
+            return offline_method
         elif isinstance(layer, RoutedExperts):
             if is_layer_skipped(
                 prefix=prefix,
@@ -203,20 +194,7 @@ class Fp8Config(QuantizationConfig):
                 match_mode=self.ignored_layers_match_mode,
             ):
                 return UnquantizedFusedMoEMethod(layer.moe_config)
-            if self.store_dtype == "mxfp4":
-                from vllm.model_executor.layers.quantization.mxfp4 import (
-                    Mxfp4MoEMethod,
-                )
-
-                return Mxfp4MoEMethod(layer.moe_config)
-            if self.is_checkpoint_fp8_serialized:
-                return Fp8MoEMethod(self, layer)
-            else:
-                from vllm.model_executor.layers.quantization.online.fp8 import (
-                    Fp8PerTensorOnlineMoEMethod,
-                )
-
-                return Fp8PerTensorOnlineMoEMethod(layer=layer)
+            return Fp8MoEMethod(self, layer)
         elif isinstance(layer, Attention):
             return Fp8KVCacheMethod(self)
         return None

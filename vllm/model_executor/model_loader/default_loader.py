@@ -14,7 +14,6 @@ from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 from vllm.config import ModelConfig
 from vllm.config.load import LoadConfig
 from vllm.logger import init_logger
-from vllm.model_executor.layers.quantization.torchao import torchao_version_at_least
 from vllm.model_executor.model_loader.base_loader import BaseModelLoader
 from vllm.model_executor.model_loader.ep_weight_filter import (
     compute_local_expert_ids,
@@ -418,7 +417,6 @@ class DefaultModelLoader(BaseModelLoader):
             if (
                 hasattr(quant_config, "is_checkpoint_torchao_serialized")
                 and quant_config.is_checkpoint_torchao_serialized
-                and torchao_version_at_least("0.15.0")
             ):
                 self.load_config.safetensors_load_strategy = "torchao"
 
