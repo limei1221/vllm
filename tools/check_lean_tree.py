@@ -9,9 +9,10 @@ violated in the focused DeepSeek build.
 
 from __future__ import annotations
 
-import regex as re
 import sys
 from pathlib import Path
+
+import regex as re
 
 BANNED_PATHS = (
     "vllm/lora",
