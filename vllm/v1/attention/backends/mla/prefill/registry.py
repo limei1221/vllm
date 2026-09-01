@@ -37,19 +37,6 @@ class MLAPrefillBackendEnum(Enum, metaclass=_MLAPrefillBackendEnumMeta):
     FLASH_ATTN = (
         "vllm.v1.attention.backends.mla.prefill.flash_attn.FlashAttnPrefillBackend"
     )
-    FLASHINFER = (
-        "vllm.v1.attention.backends.mla.prefill.flashinfer.FlashInferPrefillBackend"
-    )
-    TRTLLM_RAGGED = (
-        "vllm.v1.attention.backends.mla.prefill.trtllm_ragged."
-        "TrtllmRaggedPrefillBackend"
-    )
-    TOKENSPEED_MLA = (
-        "vllm.v1.attention.backends.mla.prefill.tokenspeed_mla."
-        "TokenspeedMLAPrefillBackend"
-    )
-    # Placeholder for third-party/custom backends - must be registered before use
-    # set to None to avoid alias with other backend, whose value is an empty string
     CUSTOM = None
 
     def get_path(self) -> str:
