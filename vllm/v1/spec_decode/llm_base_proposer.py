@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import dataclasses
-from importlib.util import find_spec
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -32,11 +31,8 @@ from vllm.model_executor.models import (
 from vllm.model_executor.models.deepseek_eagle3 import Eagle3DeepseekV2ForCausalLM
 from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.platforms import current_platform
 from vllm.utils.torch_utils import PIN_MEMORY, async_tensor_h2d
 from vllm.v1.attention.backend import CommonAttentionMetadata
-from vllm.v1.attention.backends.registry import AttentionBackendEnum
-from vllm.v1.attention.backends.triton_attn import TritonAttentionMetadata
 from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
 from vllm.v1.kv_cache_interface import KVCacheConfig, UniformTypeKVCacheSpecs
 from vllm.v1.sample.metadata import SamplingMetadata
@@ -257,50 +253,6 @@ class SpecDecodeBaseProposer:
 
         # Determine allowed attention backends once during initialization.
         self.allowed_attn_types: tuple | None = None
-        if current_platform.is_rocm():
-            from vllm.v1.attention.backends.mla.indexer import (
-                DeepseekV32IndexerMetadata,
-            )
-            from vllm.v1.attention.backends.mla.rocm_aiter_mla_sparse import (
-                ROCMAiterMLASparseMetadata,
-            )
-            from vllm.v1.attention.backends.rocm_attn import RocmAttentionMetadata
-
-            rocm_types = [
-                TritonAttentionMetadata,
-                RocmAttentionMetadata,
-                ROCMAiterMLASparseMetadata,
-                DeepseekV32IndexerMetadata,
-            ]
-            # ROCM_AITER_FA is an optional backend
-            # We check is_enabled() here to avoid importing the backend module during
-            # auto-discovery when VLLM_ROCM_USE_AITER=0, which would trigger aiter
-            # import and JIT compilation warnings. Explicit backend selection via
-            # attention_config still works because the backend module is loaded
-            # directly when selected, not through this auto-discovery path.
-            # Check if backend module exists to allow explicit selection
-            if find_spec(
-                AttentionBackendEnum.ROCM_AITER_FA.get_path(include_classname=False)
-            ):
-                from vllm.v1.attention.backends.rocm_aiter_fa import (
-                    AiterFlashAttentionMetadata,
-                )
-
-                rocm_types.append(AiterFlashAttentionMetadata)
-
-            # TRITON_MLA backend support for MLA models (e.g., DeepSeek)
-            from vllm.model_executor.layers.attention.mla_attention import (
-                MLACommonMetadata,
-            )
-
-            rocm_types.append(MLACommonMetadata)
-
-            # FlexAttention backend support
-            from vllm.v1.attention.backends.flex_attention import FlexAttentionMetadata
-
-            rocm_types.append(FlexAttentionMetadata)
-
-            self.allowed_attn_types = tuple(rocm_types)
 
     def _raise_if_padded_drafter_batch_disabled(self):
         if self.speculative_config.disable_padded_drafter_batch:

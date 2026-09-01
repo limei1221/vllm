@@ -5,14 +5,10 @@ from collections.abc import Callable
 import torch
 
 import vllm.envs as envs
-from vllm._aiter_ops import rocm_aiter_ops
 from vllm.distributed.eplb.eplb_state import EplbLayerState
 from vllm.model_executor.layers.fused_moe.config import (
     RoutingMethodType,
     get_routing_method_type,
-)
-from vllm.model_executor.layers.fused_moe.router.aiter_shared_routed_fused_moe_router import (  # noqa: E501
-    AiterSharedRoutedFusedMoERouter,
 )
 from vllm.model_executor.layers.fused_moe.router.custom_routing_router import (
     CustomRoutingRouter,
@@ -211,20 +207,6 @@ def create_fused_moe_router(
             hash_indices_table=hash_indices_table,
             num_fused_shared_experts=num_fused_shared_experts,
             shared_expert_weight=shared_expert_weight,
-        )
-
-    if (
-        num_fused_shared_experts > 0
-        and scoring_func == "softmax"
-        and rocm_aiter_ops.is_fusion_moe_shared_experts_enabled()
-    ):
-        return AiterSharedRoutedFusedMoERouter(
-            top_k=top_k,
-            global_num_experts=global_num_experts,
-            eplb_state=eplb_state,
-            num_fused_shared_experts=num_fused_shared_experts,
-            renormalize=renormalize,
-            scoring_func=scoring_func,
         )
 
     return FusedTopKRouter(

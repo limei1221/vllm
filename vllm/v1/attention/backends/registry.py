@@ -49,18 +49,6 @@ class AttentionBackendEnum(Enum, metaclass=_AttentionBackendEnumMeta):
     TRITON_ATTN_DIFFKV = (
         "vllm.v1.attention.backends.triton_attn_diffkv.TritonAttentionDiffKVBackend"
     )
-    ROCM_ATTN = "vllm.v1.attention.backends.rocm_attn.RocmAttentionBackend"
-    ROCM_AITER_MLA = "vllm.v1.attention.backends.mla.rocm_aiter_mla.AiterMLABackend"
-    ROCM_AITER_TRITON_MLA = (
-        "vllm.v1.attention.backends.mla.aiter_triton_mla.AiterTritonMLABackend"
-    )
-    ROCM_AITER_FA = (
-        "vllm.v1.attention.backends.rocm_aiter_fa.AiterFlashAttentionBackend"
-    )
-    ROCM_AITER_MLA_SPARSE = (
-        "vllm.v1.attention.backends.mla.rocm_aiter_mla_sparse.ROCMAiterMLASparseBackend"
-    )
-    XPU_MLA_SPARSE = "vllm.v1.attention.backends.mla.xpu_mla_sparse.XPUMLASparseBackend"
     TORCH_SDPA = ""  # this tag is only used for ViT
     FLASHINFER = "vllm.v1.attention.backends.flashinfer.FlashInferBackend"
     FLASHINFER_MLA = (
@@ -117,12 +105,6 @@ class AttentionBackendEnum(Enum, metaclass=_AttentionBackendEnumMeta):
     # currently limited to the Hy3 model,
     # and requires a block size of 64.
     HPC_ATTN = "vllm.v1.attention.backends.hpc_attn.HpcAttentionBackend"
-    ROCM_AITER_UNIFIED_ATTN = (
-        "vllm.v1.attention.backends.rocm_aiter_unified_attn."
-        "RocmAiterUnifiedAttentionBackend"
-    )
-    CPU_ATTN = "vllm.v1.attention.backends.cpu_attn.CPUAttentionBackend"
-    CPU_MLA = "vllm.v1.attention.backends.mla.cpu_mla.CPUMLABackend"
     TURBOQUANT = "vllm.v1.attention.backends.turboquant_attn.TurboQuantAttentionBackend"
     # Placeholder for third-party/custom backends - must be registered before use
     # set to None to avoid alias with other backend, whose value is an empty string

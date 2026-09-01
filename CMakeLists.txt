@@ -170,16 +170,12 @@ if(Python_VERSION VERSION_GREATER_EQUAL "3.11")
 endif()
 
 #
-# Forward the non-CUDA device extensions to external CMake scripts.
+# This tree is CUDA-only: the CPU, ROCm, XPU and TPU sources have been removed.
 #
-if (NOT VLLM_TARGET_DEVICE STREQUAL "cuda" AND
-    NOT VLLM_TARGET_DEVICE STREQUAL "rocm")
-    if (VLLM_TARGET_DEVICE STREQUAL "cpu")
-        include(${CMAKE_CURRENT_LIST_DIR}/cmake/cpu_extension.cmake)
-    else()
-        return()
-    endif()
-    return()
+if (NOT VLLM_TARGET_DEVICE STREQUAL "cuda")
+    message(FATAL_ERROR
+      "VLLM_TARGET_DEVICE=${VLLM_TARGET_DEVICE} is not supported in this tree. "
+      "Only 'cuda' is available; the other device backends were stripped.")
 endif()
 
 #

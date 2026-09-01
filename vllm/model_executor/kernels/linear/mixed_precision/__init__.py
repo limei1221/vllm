@@ -7,9 +7,6 @@ from vllm.model_executor.kernels.linear.mixed_precision.allspark import (
 from vllm.model_executor.kernels.linear.mixed_precision.conch import (
     ConchLinearKernel,
 )
-from vllm.model_executor.kernels.linear.mixed_precision.cpu import (
-    CPUWNA16LinearKernel,
-)
 from vllm.model_executor.kernels.linear.mixed_precision.cutlass import (
     CutlassW4A8LinearKernel,
 )
@@ -32,21 +29,8 @@ from vllm.model_executor.kernels.linear.mixed_precision.MPLinearKernel import (
     MPLinearKernel,
     MPLinearLayerConfig,
 )
-from vllm.model_executor.kernels.linear.mixed_precision.rdna3_w4a16 import (
-    RDNA3W4A16LinearKernel,
-)
-from vllm.model_executor.kernels.linear.mixed_precision.rdna_hybrid_w4a16 import (
-    RDNAHybridW4A16LinearKernel,
-)
 from vllm.model_executor.kernels.linear.mixed_precision.triton_w4a16 import (
     TritonW4A16LinearKernel,
-)
-from vllm.model_executor.kernels.linear.mixed_precision.xpu import (
-    XPUW4A8IntLinearKernel,
-    XPUwNa16LinearKernel,
-)
-from vllm.model_executor.kernels.linear.mixed_precision.zentorch import (
-    ZentorchWNA16LinearKernel,
 )
 
 __all__ = [
@@ -54,17 +38,11 @@ __all__ = [
     "MPLinearLayerConfig",
     "AllSparkLinearKernel",
     "ConchLinearKernel",
-    "CPUWNA16LinearKernel",
     "CutlassW4A8LinearKernel",
     "Dynamic4bitLinearKernel",
     "ExllamaLinearKernel",
     "HummingLinearKernel",
     "MacheteLinearKernel",
     "MarlinLinearKernel",
-    "RDNA3W4A16LinearKernel",
-    "RDNAHybridW4A16LinearKernel",
     "TritonW4A16LinearKernel",
-    "XPUW4A8IntLinearKernel",
-    "XPUwNa16LinearKernel",
-    "ZentorchWNA16LinearKernel",
 ]

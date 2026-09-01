@@ -21,9 +21,6 @@ from vllm.model_executor.layers.fused_moe.experts.cutlass_moe import (
 from vllm.model_executor.layers.fused_moe.experts.marlin_moe import (
     MarlinExperts,
 )
-from vllm.model_executor.layers.fused_moe.experts.xpu_moe import (
-    XPUExpertsMxFp4,
-)
 from vllm.model_executor.layers.fused_moe.oracle.mxfp4 import (
     Mxfp4MoeBackend,
     make_mxfp4_moe_kernel,
@@ -52,10 +49,6 @@ class CompressedTensorsW4A4Mxfp4MoEMethod(CompressedTensorsMoEMethod):
         if self.use_cutlass_mxfp4:
             logger.info_once("Using CutlassExpertsMxfp4 for MXFP4 MoE")
             self.experts_cls = CutlassExpertsMxfp4
-        elif current_platform.is_xpu():
-            self.mxfp4_backend = Mxfp4MoeBackend.XPU
-            self.experts_cls = XPUExpertsMxFp4
-            logger.info_once("Using XPUExpertsMxFp4 for MXFP4 MoE on XPU platform")
         else:
             logger.info_once("Using MarlinExperts for MXFP4 MoE")
             self.experts_cls = MarlinExperts
