@@ -206,6 +206,9 @@ cython_debug/
 # Codex
 .codex/
 
+# Local git worktrees
+.worktrees/
+
 # Cursor
 .cursor/
 

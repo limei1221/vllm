@@ -1,13 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-import os
 from collections.abc import Callable
 from concurrent.futures import Future
 from multiprocessing import Lock
 from typing import Any
-
-import torch
-import torch.distributed as dist
 
 import vllm.envs as envs
 from vllm.logger import init_logger
@@ -21,7 +17,6 @@ from vllm.utils.network_utils import (
 )
 from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
 from vllm.v1.executor.abstract import Executor
-from vllm.v1.executor.vllm_net_devices import set_worker_net_device
 from vllm.v1.outputs import AsyncModelRunnerOutput, DraftTokenIds, ModelRunnerOutput
 from vllm.v1.serial_utils import run_method
 from vllm.v1.worker.worker_base import WorkerWrapperBase
@@ -62,9 +57,6 @@ class UniProcExecutor(Executor):
             shared_worker_lock=Lock(),
         )
 
-        # Set net device env vars for the worker if VLLM_GPU_NIC_PCIE_MAPPING is set
-        set_worker_net_device(local_rank, self.vllm_config)
-
         self.driver_worker.init_worker(all_kwargs=[kwargs])
         self.driver_worker.init_device()
 
@@ -82,7 +74,6 @@ class UniProcExecutor(Executor):
             )
         else:
             distributed_init_method = get_file_store_init_method()
-        # set local rank as the device index if specified
         device_info = self.vllm_config.device_config.device.__str__().split(":")
         local_rank = int(device_info[1]) if len(device_info) > 1 else 0
         return distributed_init_method, 0, local_rank
@@ -125,9 +116,7 @@ class UniProcExecutor(Executor):
             non_block=non_block,
             single_value=True,
         )
-        # In non-blocking mode, surface any exception as early as possible.
         if non_block and output.done():
-            # Raise the exception in-line if the task failed.
             output.result()
         return output
 
@@ -145,8 +134,6 @@ class UniProcExecutor(Executor):
         return self.collective_rpc("take_draft_token_ids", single_value=True)
 
     def check_health(self) -> None:
-        # UniProcExecutor will always be healthy as long as
-        # it's running.
         return
 
     def shutdown(self) -> None:
@@ -156,52 +143,3 @@ class UniProcExecutor(Executor):
     @classmethod
     def supports_async_scheduling(cls) -> bool:
         return True
-
-
-class ExecutorWithExternalLauncher(UniProcExecutor):
-    """An executor that uses external launchers to launch engines,
-    specially designed for torchrun-compatible launchers, for
-    offline inference with tensor parallelism.
-
-    see https://github.com/vllm-project/vllm/issues/11400 for
-    the motivation, and examples/features/torchrun/torchrun_example_offline.py
-    for the usage example.
-
-    The key idea: although it is tensor-parallel inference, we only
-    create one worker per executor, users will launch multiple
-    engines with torchrun-compatible launchers, and all these engines
-    work together to process the same prompts. When scheduling is
-    deterministic, all the engines will generate the same outputs,
-    and they don't need to synchronize the states with each other.
-    """
-
-    def _init_executor(self) -> None:
-        """Initialize the worker and load the model."""
-        assert not envs.VLLM_ENABLE_V1_MULTIPROCESSING, (
-            "To get deterministic execution, "
-            "please set VLLM_ENABLE_V1_MULTIPROCESSING=0"
-        )
-        super()._init_executor()
-
-    def _distributed_args(self) -> tuple[str, int, int]:
-        # engines are launched in torchrun-compatible launchers
-        # so we can use the env:// method.
-        # required env vars:
-        # - RANK
-        # - LOCAL_RANK
-        # - MASTER_ADDR
-        # - MASTER_PORT
-        distributed_init_method = "env://"
-        rank = int(os.environ["RANK"])
-        local_rank = int(os.environ["LOCAL_RANK"])
-        return distributed_init_method, rank, local_rank
-
-    def determine_available_memory(self) -> list[int]:  # in bytes
-        # we need to get the min across all ranks.
-        memory = super().determine_available_memory()
-        from vllm.distributed.parallel_state import get_world_group
-
-        cpu_group = get_world_group().cpu_group
-        memory_tensor = torch.tensor([memory], device="cpu", dtype=torch.int64)
-        dist.all_reduce(memory_tensor, group=cpu_group, op=dist.ReduceOp.MIN)
-        return [memory_tensor.item()]
