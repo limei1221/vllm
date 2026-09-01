@@ -66,18 +66,6 @@ class VisionLanguageConfig(Protocol):
 
 
 def get_vision_encoder_info(hf_config: VisionLanguageConfig) -> VisionEncoderInfo:
-    # Avoid circular imports
-    from .clip import CLIPEncoderInfo, CLIPVisionConfig
-    from .pixtral import PixtralHFEncoderInfo, PixtralVisionConfig
-    from .siglip import SiglipEncoderInfo, SiglipVisionConfig
-
-    if isinstance(hf_config.vision_config, CLIPVisionConfig):
-        return CLIPEncoderInfo(hf_config)
-    if isinstance(hf_config.vision_config, PixtralVisionConfig):
-        return PixtralHFEncoderInfo(hf_config)
-    if isinstance(hf_config.vision_config, SiglipVisionConfig):
-        return SiglipEncoderInfo(hf_config)
-
     msg = f"Unsupported vision config: {type(hf_config.vision_config)}"
     raise NotImplementedError(msg)
 

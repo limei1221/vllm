@@ -62,12 +62,6 @@ def _mxfp8_backend_to_kernel_cls(
         )
 
         return [AiterMxfp8Experts]
-    if backend == Fp8MoeBackend.TRITON_MXFP8:
-        from vllm.model_executor.layers.fused_moe.experts.mxfp8_native_moe import (
-            Mxfp8NativeTritonExperts,
-        )
-
-        return [Mxfp8NativeTritonExperts]
     if backend == Fp8MoeBackend.EMULATION:
         from vllm.model_executor.layers.fused_moe.experts.mxfp8_emulation_moe import (
             Mxfp8EmulationTritonExperts,
