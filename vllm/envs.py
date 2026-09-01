@@ -166,12 +166,6 @@ if TYPE_CHECKING:
     VLLM_P2P_SIDE_CHANNEL_PORT: int = 5710
     VLLM_EC_SIDE_CHANNEL_HOST: str = "localhost"
     VLLM_EC_SIDE_CHANNEL_PORT: int = 5601
-    VLLM_MOONCAKE_BOOTSTRAP_PORT: int = 8998
-    VLLM_MOONCAKE_STORE_TIER_LOG: bool = False
-    VLLM_MOONCAKE_LOAD_RECV_THREADS: int = 1
-    VLLM_MOONCAKE_DISK_STAGING_USABLE_RATIO: float = 0.9
-    MOONCAKE_PREFERRED_SEGMENT: str | None = None
-    MOONCAKE_REQUESTER_LOCAL_HOSTNAME: str | None = None
     VLLM_MAX_TOKENS_PER_EXPERT_FP4_MOE: int = 163840
     VLLM_MQ_MAX_CHUNK_BYTES_MB: int = 16
     VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS: int = 300
@@ -179,7 +173,6 @@ if TYPE_CHECKING:
     VLLM_KV_CACHE_LAYOUT: Literal["NHD", "HND"] | None = None
     VLLM_COMPUTE_NANS_IN_LOGITS: bool = False
     VLLM_RAISE_ON_LOGIT_NANS: bool = False
-    VLLM_MOONCAKE_ABORT_REQUEST_TIMEOUT: int = 480
     VLLM_ENABLE_CUDAGRAPH_GC: bool = False
     VLLM_LOOPBACK_IP: str = ""
     VLLM_ALLOW_CHUNKED_LOCAL_ATTN_WITH_HYBRID_KV_CACHE: bool = True
@@ -1190,32 +1183,6 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "VLLM_EC_SIDE_CHANNEL_PORT": lambda: int(
         os.getenv("VLLM_EC_SIDE_CHANNEL_PORT", "5601")
     ),
-    # Port used for Mooncake handshake between remote agents.
-    "VLLM_MOONCAKE_BOOTSTRAP_PORT": lambda: int(
-        os.getenv("VLLM_MOONCAKE_BOOTSTRAP_PORT", "8998")
-    ),
-    # Log per-batch memory/disk tier breakdown on external GETs.
-    "VLLM_MOONCAKE_STORE_TIER_LOG": lambda: (
-        os.getenv("VLLM_MOONCAKE_STORE_TIER_LOG", "False").lower() in ("true", "1")
-    ),
-    # Number of parallel KV-load receive threads per worker rank. Lets the
-    # per-request control overhead (Python prep + master key lookup) of one
-    # request overlap with the RDMA transfer of another, keeping the transfer
-    # engine's queue pairs busy. Helps when that overhead is significant or
-    # per-request batches are too small to saturate the link on their own.
-    "VLLM_MOONCAKE_LOAD_RECV_THREADS": lambda: int(
-        os.getenv("VLLM_MOONCAKE_LOAD_RECV_THREADS", "1")
-    ),
-    # Fraction of the owner's DirectIO staging buffer to fill per GET batch.
-    "VLLM_MOONCAKE_DISK_STAGING_USABLE_RATIO": lambda: float(
-        os.getenv("VLLM_MOONCAKE_DISK_STAGING_USABLE_RATIO", "0.9")
-    ),
-    # Pin this rank to a specific owner segment ("host:port").
-    "MOONCAKE_PREFERRED_SEGMENT": lambda: os.getenv("MOONCAKE_PREFERRED_SEGMENT"),
-    # Override the hostname the rank registers as a Mooncake requester.
-    "MOONCAKE_REQUESTER_LOCAL_HOSTNAME": lambda: os.getenv(
-        "MOONCAKE_REQUESTER_LOCAL_HOSTNAME"
-    ),
     # Override the directory for the FlashInfer autotune config cache.
     "VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR": lambda: os.getenv(
         "VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR", None
@@ -1290,10 +1257,6 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # also enables the NaN computation required to detect them.
     "VLLM_RAISE_ON_LOGIT_NANS": lambda: bool(
         int(os.getenv("VLLM_RAISE_ON_LOGIT_NANS", "0"))
-    ),
-    # Timeout (in seconds) for MooncakeConnector in PD disaggregated setup.
-    "VLLM_MOONCAKE_ABORT_REQUEST_TIMEOUT": lambda: int(
-        os.getenv("VLLM_MOONCAKE_ABORT_REQUEST_TIMEOUT", "480")
     ),
     # If set, it means we pre-downloaded cubin files and flashinfer will
     # read the cubin files directly.
