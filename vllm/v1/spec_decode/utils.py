@@ -4,9 +4,6 @@ import torch
 
 from vllm.platforms import current_platform
 from vllm.triton_utils import tl, triton
-from vllm.v1.attention.backends.utils import (
-    CommonAttentionMetadata,
-)
 
 PADDING_SLOT_ID = -1
 
@@ -83,54 +80,6 @@ def eagle_step_slot_mapping_metadata_kernel(
     tl.store(out_clamped_positions_ptr + req_idx, clamped_position)
     tl.store(out_slot_mapping_ptr + req_idx, slot_id)
     tl.store(seq_lens_ptr + req_idx, new_seq_len)
-
-
-def eagle_step_update_slot_mapping_and_metadata(
-    positions_1d: torch.Tensor,
-    block_table_tensor: torch.Tensor,
-    seq_lens: torch.Tensor,
-    block_size: int,
-    max_model_len: int,
-    out_clamped_positions: torch.Tensor,
-    out_slot_mapping: torch.Tensor,
-    input_batch_size: int | None = None,
-) -> None:
-    """
-    Fused update of slot mapping and metadata for one EAGLE autoregressive step.
-    Updates seq_lens in place. Writes to out_clamped_positions and out_slot_mapping.
-
-    When input_batch_size > batch_size, threads beyond batch_size write
-    PADDING_SLOT_ID to out_slot_mapping for cudagraph padding.
-
-    Args:
-        positions_1d: [batch_size] current positions (use positions[0] for M-RoPE)
-        block_table_tensor: [batch_size, n_blocks_per_req]
-        seq_lens: [batch_size] updated in place
-        block_size: KV cache block size
-        max_model_len: max model length for clamping
-        out_clamped_positions: [batch_size] output buffer for clamped positions
-        out_slot_mapping: [input_batch_size] output buffer for slot mapping
-        input_batch_size: total batch size including cudagraph padding;
-            defaults to batch_size (no padding)
-    """
-    batch_size = positions_1d.shape[0]
-    if input_batch_size is None:
-        input_batch_size = batch_size
-
-    n_blocks_per_req = block_table_tensor.shape[1]
-    eagle_step_slot_mapping_metadata_kernel[(input_batch_size,)](
-        positions_1d,
-        block_table_tensor,
-        block_table_tensor.stride(0),
-        seq_lens,
-        out_clamped_positions,
-        out_slot_mapping,
-        block_size=block_size,
-        max_model_len=max_model_len,
-        n_blocks_per_req=n_blocks_per_req,
-        PAD_ID=PADDING_SLOT_ID,
-        batch_size=batch_size,
-    )
 
 
 @triton.jit
@@ -236,71 +185,6 @@ def eagle_prepare_next_token_padded_kernel(
             tl.store(next_token_ids_ptr + req_idx, backup_token)
 
         tl.store(valid_sampled_tokens_count_ptr + req_idx, valid_count)
-
-
-def compute_new_slot_mapping(
-    cad: CommonAttentionMetadata,
-    new_positions: torch.Tensor,
-    is_rejected_token_mask: torch.Tensor,
-    block_size: int,
-    num_new_tokens: int,
-    max_model_len: int,
-):
-    batch_size, n_blocks_per_req = cad.block_table_tensor.shape
-    req_indices = torch.arange(batch_size, device=cad.query_start_loc.device)
-    req_indices = torch.repeat_interleave(
-        req_indices,
-        cad.naive_query_lens() + num_new_tokens,
-        output_size=len(new_positions),
-    )
-    # Clamp the positions to prevent an out-of-bounds error when indexing
-    # into block_table_tensor.
-    clamped_positions = torch.clamp(new_positions, max=max_model_len - 1)
-    block_table_indices = (
-        req_indices * n_blocks_per_req + clamped_positions // block_size
-    )
-    block_nums = cad.block_table_tensor.view(-1)[block_table_indices]
-    block_offsets = clamped_positions % block_size
-    new_slot_mapping = block_nums * block_size + block_offsets
-    # Mask out the position ids that exceed the max model length.
-    exceeds_max_model_len = new_positions >= max_model_len
-    new_slot_mapping.masked_fill_(exceeds_max_model_len, PADDING_SLOT_ID)
-    # Mask out rejected tokens to prevent saves to the KV cache.
-    new_slot_mapping.masked_fill_(is_rejected_token_mask, PADDING_SLOT_ID)
-    return new_slot_mapping
-
-
-def extend_all_queries_by_N(
-    common_attn_metadata: CommonAttentionMetadata,
-    N: int,
-    arange: torch.Tensor,
-    new_slot_mapping: torch.Tensor,
-) -> CommonAttentionMetadata:
-    """
-    Creates a new CommonAttentionMetadata with all query lengths increased by N.
-    Also all seq lens are increased by N.
-    This is useful e.g. in speculative decoding with parallel drafting, where we
-    extend each sequence by N tokens and predict all tokens in one pass.
-    The slot mapping is computed externally, as it requires more information.
-    """
-    cad = common_attn_metadata
-    # query start loc must be increased by [+0, +N, +2N, ..., +batch_size * N]
-    new_query_start_loc = cad.query_start_loc + N * arange[: len(cad.query_start_loc)]
-    new_query_start_loc_cpu = cad.query_start_loc_cpu + N * torch.arange(
-        len(cad.query_start_loc_cpu), dtype=torch.int32
-    )
-    new_cad = cad.replace(
-        query_start_loc=new_query_start_loc,
-        query_start_loc_cpu=new_query_start_loc_cpu,
-        seq_lens=cad.seq_lens + N,
-        # each request is extended by N tokens -> batch_size * N tokens are added
-        num_actual_tokens=cad.num_actual_tokens + cad.batch_size() * N,
-        # All query lens increase by N, so max query len increases by N
-        max_query_len=cad.max_query_len + N,
-        max_seq_len=cad.max_seq_len + N,
-        slot_mapping=new_slot_mapping,
-    )
-    return new_cad
 
 
 # Unified copy/expand kernel

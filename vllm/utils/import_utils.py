@@ -9,7 +9,6 @@ This is similar in concept to the `importlib` module.
 
 import importlib.metadata
 import importlib.util
-import os
 import sys
 from functools import cache
 from types import ModuleType
@@ -23,34 +22,38 @@ from vllm.logger import init_logger
 logger = init_logger(__name__)
 
 
-def import_pynvml():
-    """
-    Historical comments:
+# The official NVML bindings ship as `nvidia-ml-py` but import as `pynvml`.
+# An unofficial PyPI package also called `pynvml` installs a *package* under the
+# same name; if it shadows the official one, NVML calls fail in confusing ways.
+# See https://github.com/vllm-project/vllm/issues/12847. Rather than vendor the
+# whole binding, check for the handful of symbols this build uses and fail with
+# a message that names the fix.
+_REQUIRED_NVML_SYMBOLS = (
+    "nvmlInit",
+    "nvmlShutdown",
+    "nvmlDeviceGetCount",
+    "nvmlDeviceGetHandleByIndex",
+    "nvmlDeviceGetHandleByUUID",
+    "nvmlDeviceGetCudaComputeCapability",
+    "nvmlDeviceGetMemoryInfo",
+    "nvmlDeviceGetP2PStatus",
+    "NVMLError",
+)
 
-    libnvml.so is the library behind nvidia-smi, and
-    pynvml is a Python wrapper around it. We use it to get GPU
-    status without initializing CUDA context in the current process.
-    Historically, there are two packages that provide pynvml:
-    - `nvidia-ml-py` (https://pypi.org/project/nvidia-ml-py/): The official
-        wrapper. It is a dependency of vLLM, and is installed when users
-        install vLLM. It provides a Python module named `pynvml`.
-    - `pynvml` (https://pypi.org/project/pynvml/): An unofficial wrapper.
-        Prior to version 12.0, it also provides a Python module `pynvml`,
-        and therefore conflicts with the official one. What's worse,
-        the module is a Python package, and has higher priority than
-        the official one which is a standalone Python file.
-        This causes errors when both of them are installed.
-        Starting from version 12.0, it migrates to a new module
-        named `pynvml_utils` to avoid the conflict.
-    It is so confusing that many packages in the community use the
-    unofficial one by mistake, and we have to handle this case.
-    For example, `nvcr.io/nvidia/pytorch:24.12-py3` uses the unofficial
-    one, and it will cause errors, see the issue
-    https://github.com/vllm-project/vllm/issues/12847 for example.
-    After all the troubles, we decide to copy the official `pynvml`
-    module to our codebase, and use it directly.
-    """
-    import vllm.third_party.pynvml as pynvml
+
+@cache
+def import_pynvml():
+    """Return the official NVML bindings from `nvidia-ml-py`."""
+    import pynvml
+
+    missing = [s for s in _REQUIRED_NVML_SYMBOLS if not hasattr(pynvml, s)]
+    if missing:
+        raise ImportError(
+            f"The installed `pynvml` module is missing {', '.join(missing)}. "
+            "This usually means the unofficial `pynvml` package is shadowing "
+            "the official bindings. Run `pip uninstall -y pynvml` and "
+            "`pip install nvidia-ml-py`."
+        )
 
     return pynvml
 
@@ -80,25 +83,6 @@ def import_triton_kernels():
             "Please consider installing triton_kernels from "
             "https://github.com/triton-lang/triton/tree/main/python/triton_kernels"
         )
-
-
-def import_from_path(module_name: str, file_path: str | os.PathLike):
-    """
-    Import a Python file according to its file path.
-
-    Based on the official recipe:
-    https://docs.python.org/3/library/importlib.html#importing-a-source-file-directly
-    """
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    if spec is None:
-        raise ModuleNotFoundError(f"No module named {module_name!r}")
-
-    assert spec.loader is not None
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def resolve_obj_by_qualname(qualname: str) -> Any:
@@ -460,33 +444,6 @@ def _format_nccl_raw_version(raw: int) -> str:
     return f"{s[0]}.{s[1:3].lstrip('0') or '0'}.{s[3:].lstrip('0') or '0'}"
 
 
-def has_deep_ep_v2() -> bool:
-    """Whether deep_ep with ElasticBuffer (v2 API) is available.
-
-    Requires both the ElasticBuffer class in the deep_ep module and
-    NCCL >= 2.30.4 (GIN backend), checked against the runtime library.
-    """
-    if not _has_module("deep_ep"):
-        return False
-    import deep_ep  # type: ignore[import-not-found]
-
-    if not hasattr(deep_ep, "ElasticBuffer"):
-        return False
-    try:
-        nccl_ver = _get_runtime_nccl_version()
-        if nccl_ver is None or nccl_ver < DEEPEP_V2_MIN_NCCL_VERSION_RAW:
-            logger.info_once(
-                "DeepEP v2 requires NCCL >= %s but found %s. "
-                "deepep_v2 backend will not be available.",
-                _format_nccl_raw_version(DEEPEP_V2_MIN_NCCL_VERSION_RAW),
-                _format_nccl_raw_version(nccl_ver) if nccl_ver else "unknown",
-            )
-            return False
-    except Exception:
-        return False
-    return True
-
-
 def has_deep_gemm() -> bool:
     """Whether the optional `deep_gemm` package is available.
 
@@ -583,21 +540,3 @@ def has_humming() -> bool:
 def has_quark():
     """Whether the optional `quark` package is available."""
     return _has_module("quark")
-
-
-def check_torchcodec_available():
-    """Whether the optional `torchcodec` package is available."""
-    try:
-        import torchcodec  # noqa: F401
-    except RuntimeError as e:
-        # torchcodec will raise RuntimeError during import instead
-        # of ImportError when system ffmpeg unavailable, with a
-        # message that can leak sensitive system information.
-        # Trim it down to avoid it.
-        marker = (
-            "The following exceptions were raised as we tried to load libtorchcodec:"
-        )
-        message = str(e)
-        if marker in message:
-            raise RuntimeError(message.split(marker, 1)[0].rstrip()) from None
-        raise e

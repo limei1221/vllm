@@ -30,7 +30,6 @@ from vllm.utils.torch_utils import (
 )
 
 if TYPE_CHECKING:
-    from transformers import PretrainedConfig
     from transformers.conversion_mapping import WeightRenaming
 
     from vllm.config.model import ModelConfig
@@ -428,75 +427,6 @@ class AutoWeightsLoader:
         return autoloaded_weights
 
 
-def maybe_fuse_shared_experts(
-    weights: Iterable[tuple[str, torch.Tensor]],
-    *,
-    n_routed_experts: int,
-    n_shared_experts: int,
-    ckpt_prefix: str = "mlp.shared_experts",
-    enabled: bool | None = None,
-) -> Iterable[tuple[str, torch.Tensor]]:
-    """Route AITER fused-shared-expert checkpoint weights into fused slots.
-
-    When AITER fused-shared-experts is active, shared experts are packed into
-    the routed expert tensor. The checkpoint stores them under `ckpt_prefix`
-    as a single (possibly widened) tensor; this splits it into
-    `n_shared_experts` chunks named `mlp.experts.{n_routed_experts + j}` so
-    the `RoutedExperts` loader treats them as extra experts. Yields the input
-    unchanged when the fusion is inactive, so callers can wrap unconditionally.
-
-    Args:
-        weights: Iterable of `(name, tensor)` checkpoint pairs.
-        n_routed_experts: Number of routed experts; offsets the fused slots.
-        n_shared_experts: Number of shared experts packed into the tensor.
-        ckpt_prefix: Checkpoint module name of the shared experts.
-        enabled: Whether AITER fused-shared-experts is active. Defaults to
-            `rocm_aiter_ops.is_fusion_moe_shared_experts_enabled()`; pass an
-            explicit value only when the model gates on something more (e.g.
-            quant-spec compatibility) and it must match its construction-time
-            decision.
-
-    Yields:
-        `(name, tensor)` pairs with shared experts routed to fused slots.
-    """
-    if enabled is None:
-        from vllm._aiter_ops import rocm_aiter_ops
-
-        enabled = rocm_aiter_ops.is_fusion_moe_shared_experts_enabled()
-    if not enabled:
-        yield from weights
-        return
-
-    # Match on the dotted boundary so e.g. "mlp.shared_expert." does not also
-    # catch a sibling "mlp.shared_expert_gate".
-    prefix = f"{ckpt_prefix}."
-    for name, loaded_weight in weights:
-        if prefix not in name:
-            yield name, loaded_weight
-            continue
-        # gate/up split on the output dim; down_proj on the input dim.
-        split_dim = 1 if ("down_proj.weight" in name and loaded_weight.ndim > 1) else 0
-        total = loaded_weight.shape[split_dim]
-        if total % n_shared_experts != 0:
-            raise ValueError(
-                f"FSE shared-expert weight {name!r} has size {total} along axis "
-                f"{split_dim}, not divisible by n_shared_experts={n_shared_experts}."
-            )
-        chunk = total // n_shared_experts
-        for j in range(n_shared_experts):
-            sl = slice(j * chunk, (j + 1) * chunk)
-            if loaded_weight.ndim == 1:
-                chunk_weight = loaded_weight[sl]
-            elif split_dim == 0:
-                chunk_weight = loaded_weight[sl, :]
-            else:
-                chunk_weight = loaded_weight[:, sl]
-            yield (
-                name.replace(prefix, f"mlp.experts.{n_routed_experts + j}."),
-                chunk_weight,
-            )
-
-
 def get_spec_layer_idx_from_weight_name(
     config: "ModelConfig", weight_name: str
 ) -> int | None:
@@ -517,48 +447,6 @@ def get_spec_layer_idx_from_weight_name(
         if weight_name.startswith((f"model.layers.{base + i}.", f"layers.{base + i}.")):
             return base + i
     return None
-
-
-def skip_spec_layers(
-    weights: Iterable[tuple[str, torch.Tensor]], config: "ModelConfig"
-) -> Iterable[tuple[str, torch.Tensor]]:
-    """Drop MTP spec-layer weights (loaded by the MTP head, not the base model).
-
-    Args:
-        weights: Iterable of `(name, tensor)` checkpoint pairs.
-        config: The model config, passed to `get_spec_layer_idx_from_weight_name`.
-
-    Yields:
-        `(name, tensor)` pairs whose weight is not an MTP-layer weight.
-    """
-    return (
-        (name, w)
-        for name, w in weights
-        if get_spec_layer_idx_from_weight_name(config, name) is None
-    )
-
-
-def init_vllm_registered_model(
-    vllm_config: VllmConfig,
-    *,
-    prefix: str = "",
-    hf_config: "PretrainedConfig | None" = None,
-    architectures: list[str] | None = None,
-) -> nn.Module:
-    """
-    Helper function to initialize an inner model registered to vLLM,
-    based on the arguments passed to the outer vLLM model.
-    """
-    from vllm.model_executor.model_loader.utils import initialize_model
-
-    if hf_config is None and architectures is not None:
-        # So that the architectures field is overridden
-        hf_config = vllm_config.model_config.hf_config
-
-    if hf_config is not None:
-        vllm_config = vllm_config.with_hf_config(hf_config, architectures=architectures)
-
-    return initialize_model(vllm_config=vllm_config, prefix=prefix)
 
 
 @overload
@@ -655,37 +543,6 @@ def split_list_into_ranges(lst: torch.Tensor, interval: int) -> list[list[int]]:
         index = num // interval
         ranges[index].append(num)
     return ranges
-
-
-def collect_children(
-    module: nn.Module,
-    *,
-    targets: type[nn.Module] | tuple[type[nn.Module], ...] | None = None,
-):
-    """
-    Within this context, collect all direct child assignments to `module`,
-    returning a list of children names that is internally updated until the
-    context is exited.
-
-    If `targets` is set, instead collect descendents of `module`
-    that are an instance of `targets`, even if they aren't direct children.
-    """
-    children_names = list[str]()
-
-    if targets is None:
-
-        def hook(module_: nn.Module, name: str, submodule: nn.Module):
-            if module_ is module:
-                children_names.append(name)
-
-        with register_module_module_registration_hook(hook):
-            yield children_names
-    else:
-        yield children_names
-
-        for name, module_ in module.named_modules():
-            if isinstance(module_, targets):
-                children_names.append(name)
 
 
 @contextmanager
@@ -905,32 +762,6 @@ def cast_overflow_tensors(tensors: torch.Tensor, offset: float = 1000) -> torch.
     return torch.clamp(tensors, min=-clamp_value, max=clamp_value)
 
 
-def fast_topk(
-    values: torch.Tensor, topk: int, dim: int
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Optimized topk implementation that uses torch.max for k=1 case.
-
-    This function provides better performance for the common case of k=1
-    by using torch.max instead of the more general torch.topk.
-
-    Args:
-        values: Input tensor to find top-k values from
-        topk: Number of top values to return (k). Must be > 0.
-        dim: Dimension along which to compute topk
-
-    Returns:
-        Tuple of (values, indices) where values are the top-k values
-        and indices are their corresponding indices in the input tensor
-    """
-    if topk == 1:
-        # Use max along the specified dimension to get both value and index
-        return torch.max(values, dim=dim, keepdim=True)
-    else:
-        # Use topk for efficiency with larger k values
-        return torch.topk(values, topk, dim=dim)
-
-
 # Chunk x along the num_tokens axis for sequence parallelism
 # NOTE: This is wrapped in a torch custom op to work around the following issue:
 # The output tensor can have a sequence length 0 at small input sequence lengths
@@ -997,35 +828,6 @@ def process_eagle_weight(
         model.has_own_lm_head = True
     if "embed_tokens" in name:
         model.has_own_embed_tokens = True
-
-
-def get_layer_index(feature_layer_index: int, num_hidden_layers: int) -> int:
-    """Given a signed vision feature layer, get the number of hidden layers
-       needed to leverage it.
-
-    Args:
-        feature_layer_index: Index of a required layer in the visual encoder.
-        num_hidden_layers: The total number of hidden layers in the visual encoder.
-    """
-    if feature_layer_index < 0:
-        return num_hidden_layers + feature_layer_index + 1
-    return feature_layer_index
-
-
-def scatter_output_slices(
-    output: torch.Tensor,
-    indices: list[int],
-    per_item_out_tokens: list[int],
-    dest: dict[int, torch.Tensor] | list[torch.Tensor | None],
-    clone: bool = False,
-) -> None:
-    """Slice a concatenated output tensor and scatter into dest by index."""
-    offset = 0
-    for idx in indices:
-        n_tok = per_item_out_tokens[idx]
-        sliced = output[offset : offset + n_tok]
-        dest[idx] = sliced.clone() if clone else sliced
-        offset += n_tok
 
 
 def parse_diarized_timestamp(marker: str) -> float | None:

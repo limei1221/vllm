@@ -31,7 +31,6 @@ It supports page size >= 1.
 
 import logging
 
-import torch
 from packaging import version
 
 from vllm.platforms import current_platform
@@ -751,68 +750,3 @@ def decode_attention_fwd_grouped(
     _decode_softmax_reducev_fwd(
         attn_logits, q, o, lse, v_buffer, b_seq_len, num_kv_splits
     )
-
-
-def decode_attention_fwd(
-    q,
-    k_buffer,
-    v_buffer,
-    o,
-    lse,
-    req_to_token,
-    b_seq_len,
-    attn_logits,
-    num_kv_splits,
-    sm_scale,
-    page_size=1,
-    logit_cap=0.0,
-    k_scale=None,
-    v_scale=None,
-    is_mla=False,
-):
-    assert num_kv_splits == attn_logits.shape[2]
-
-    if k_scale is None:
-        k_scale = torch.tensor(1.0, dtype=torch.float32, device=q.device)
-    if v_scale is None:
-        v_scale = torch.tensor(1.0, dtype=torch.float32, device=q.device)
-
-    kv_group_num = q.shape[1] // v_buffer.shape[-2]
-
-    if kv_group_num == 1:
-        # MHA
-        decode_attention_fwd_normal(
-            q,
-            k_buffer,
-            v_buffer,
-            o,
-            lse,
-            req_to_token,
-            b_seq_len,
-            attn_logits,
-            num_kv_splits,
-            sm_scale,
-            page_size,
-            logit_cap,
-            k_scale,
-            v_scale,
-        )
-    else:
-        # GQA/MQA/MLA
-        decode_attention_fwd_grouped(
-            q,
-            k_buffer,
-            v_buffer,
-            o,
-            lse,
-            req_to_token,
-            b_seq_len,
-            attn_logits,
-            num_kv_splits,
-            sm_scale,
-            page_size,
-            logit_cap,
-            k_scale,
-            v_scale,
-            is_mla=is_mla,
-        )

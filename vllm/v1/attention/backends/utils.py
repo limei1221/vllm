@@ -2,10 +2,9 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import functools
 from collections.abc import Callable
-from dataclasses import dataclass, field, fields, make_dataclass
+from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
-    Any,
     Literal,
     Protocol,
     get_args,
@@ -17,8 +16,7 @@ from typing_extensions import runtime_checkable
 
 from vllm.config import VllmConfig, get_layers_from_vllm_config
 from vllm.utils.math_utils import cdiv
-from vllm.utils.torch_utils import PIN_MEMORY, async_tensor_h2d, np_to_pinned_tensor
-from vllm.v1.kv_cache_interface import KVCacheSpec, MambaSpec
+from vllm.utils.torch_utils import async_tensor_h2d
 
 if TYPE_CHECKING:
     pass
@@ -30,11 +28,7 @@ from vllm.distributed.kv_transfer.kv_connector.utils import (
 from vllm.logger import init_logger
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
 from vllm.v1.attention.backend import (
-    AttentionBackend,
-    AttentionImpl,
-    AttentionMetadata,
     CommonAttentionMetadata,
-    subclass_attention_backend,
 )
 
 logger = init_logger(__name__)
@@ -43,35 +37,6 @@ _KV_CACHE_LAYOUT_OVERRIDE: KVCacheLayoutType | None = None
 
 PAD_SLOT_ID = -1
 NULL_BLOCK_ID = 0
-
-
-def compute_mm_prefix_range_tensor(
-    mm_prefix_range: dict[int, list[tuple[int, int]]] | None,
-    num_seqs: int,
-    device: torch.device,
-) -> torch.Tensor | None:
-    """Convert mm_prefix_range dict to padded tensor for Triton kernel.
-
-    Returns shape: (num_seqs, max_ranges, 2) with 0-padding for empty ranges.
-    Empty ranges have start==end==0, which kernel skips via is_valid check.
-    """
-    if mm_prefix_range is None:
-        return None
-
-    range_lists = [
-        mm_prefix_range.get(i, [(0, 0)]) or [(0, 0)] for i in range(num_seqs)
-    ]
-
-    if all(r == [(0, 0)] for r in range_lists):
-        return None
-
-    max_ranges = max(len(r) for r in range_lists)
-    padded = []
-    for r in range_lists:
-        padded_r = list(r) + [(0, 0)] * (max_ranges - len(r))
-        padded.append(padded_r)
-    padded = async_tensor_h2d(padded, dtype=torch.int32, device=device)
-    return padded.view(num_seqs, max_ranges, 2)
 
 
 def fill_mm_prefix_query_ranges(
@@ -203,39 +168,6 @@ class PerLayerParameters:
     has_same_all_params: bool | None = field(default=None, compare=False)
 
 
-def get_per_layer_parameters(
-    vllm_config: VllmConfig, layer_names: list[str], cls_: type["AttentionImpl"]
-) -> dict[str, PerLayerParameters]:
-    """
-    Scan layers in `layer_names` and determine some hyperparameters
-    to use during `plan`.
-    """
-
-    layers = get_layers_from_vllm_config(
-        vllm_config,
-        AttentionLayerBase,  # type: ignore[type-abstract]
-        layer_names,
-    )
-    per_layer_params: dict[str, PerLayerParameters] = {}
-
-    for key, layer in layers.items():
-        impl = layer.impl
-        assert isinstance(impl, cls_)
-
-        # Infer hyperparameters from the attention layer
-        window_size = getattr(impl, "sliding_window", None)
-        window_left = window_size[0] if window_size is not None else -1
-        logits_soft_cap = getattr(impl, "logits_soft_cap", None)
-        sm_scale = impl.scale
-        has_sinks = getattr(impl, "sinks", None) is not None
-
-        per_layer_params[key] = PerLayerParameters(
-            window_left, logits_soft_cap, sm_scale, has_sinks
-        )
-
-    return per_layer_params
-
-
 def get_num_attention_heads_from_layers(
     vllm_config: VllmConfig, layer_names: list[str]
 ) -> int | None:
@@ -260,36 +192,6 @@ def get_num_attention_heads_from_layers(
         f"got {heads} for {layer_names}."
     )
     return heads.pop()
-
-
-def infer_global_hyperparameters(
-    per_layer_params: dict[str, PerLayerParameters],
-) -> PerLayerParameters:
-    """
-    Currently, FlashInfer backend other than trtllm-gen
-    only support models in which all layers share
-    the same values for the following hyperparameters:
-    - `window_left`
-    - `logits_soft_cap`
-    - `sm_scale`
-
-    So this function asserts that all layers share the same values for these
-    hyperparameters and returns the global values.
-    """
-
-    assert len(per_layer_params) > 0, "No attention layers found in the model."
-
-    param_sets = list(per_layer_params.values())
-    global_params = param_sets[0]
-
-    global_params.has_same_window_lefts = all(
-        params.window_left == global_params.window_left for params in param_sets
-    )
-    global_params.has_same_all_params = all(
-        params == global_params for params in param_sets
-    )
-
-    return global_params
 
 
 #
@@ -490,81 +392,6 @@ def make_local_attention_virtual_batches(
     ), make_block_table
 
 
-def make_kv_sharing_fast_prefill_common_attn_metadata(
-    common_attn_metadata: CommonAttentionMetadata,
-) -> CommonAttentionMetadata:
-    if common_attn_metadata.max_query_len == 1:
-        # All requests are decode (assume 1 token for now)
-        # Skip computing fast prefill path
-        return common_attn_metadata
-
-    assert common_attn_metadata.logits_indices_padded is not None
-    assert common_attn_metadata.num_logits_indices is not None
-
-    logits_indices_padded = common_attn_metadata.logits_indices_padded
-    num_logits_indices = common_attn_metadata.num_logits_indices
-    # Get rid of CUDAGraph padding, if any
-    logits_indices = logits_indices_padded[:num_logits_indices]
-    num_reqs = common_attn_metadata.num_reqs
-    query_start_loc = common_attn_metadata.query_start_loc
-    # Example inputs
-    # num_reqs: 3
-    # generation_indices:  [14, 18, 19, 27]
-    # query_start_loc: [0, 15, 20, 28]
-    # seq_lens:        [41, 31, 40]
-
-    # Find how many decode indices belong to each request
-    # request_ids: [0, 1, 1, 2]
-    request_ids = torch.bucketize(logits_indices, query_start_loc[1:], right=True)
-
-    # Figure out how many tokens are in each request
-    # num_decode_tokens: [1, 2, 1]
-    # Avoid `torch.bincount` here — on CUDA it forces a sync to determine
-    # the output size (even with `minlength`, the kernel must confirm no
-    # value exceeds the bound). `scatter_add_` into a preallocated buffer
-    # is equivalent and stays async.
-    num_decode_tokens = torch.zeros(
-        num_reqs, dtype=request_ids.dtype, device=request_ids.device
-    )
-    num_decode_tokens.scatter_add_(
-        0, request_ids.to(num_decode_tokens.dtype), torch.ones_like(request_ids)
-    )
-
-    # Calculate new query_start_loc with tokens in generation_indices
-    # decode_query_start_loc: [0, 1, 3, 4]
-    decode_query_start_loc = torch.empty(
-        num_reqs + 1, device=query_start_loc.device, dtype=query_start_loc.dtype
-    )
-
-    decode_query_start_loc[:1].fill_(0)  # Avoid sync from scalar assignment.
-    decode_query_start_loc[1:] = torch.cumsum(num_decode_tokens, dim=0)
-
-    # `num_decode_tokens` is a histogram over `logits_indices`, so its total is
-    # just how many there were -- already known as a Python int.
-    total_num_decode_tokens = num_logits_indices
-
-    # Largest per-request logits count.
-    decode_max_query_len = common_attn_metadata.max_logits_per_req
-    assert decode_max_query_len is not None
-
-    common_attn_metadata = CommonAttentionMetadata(
-        query_start_loc=decode_query_start_loc,
-        query_start_loc_cpu=decode_query_start_loc.to("cpu", non_blocking=True),
-        seq_lens=common_attn_metadata.seq_lens,
-        num_reqs=num_reqs,
-        num_actual_tokens=total_num_decode_tokens,
-        max_query_len=decode_max_query_len,
-        max_seq_len=common_attn_metadata.max_seq_len,
-        block_table_tensor=common_attn_metadata.block_table_tensor,
-        slot_mapping=common_attn_metadata.slot_mapping,
-        causal=True,
-        seq_lens_cpu_upper_bound=common_attn_metadata.seq_lens_cpu_upper_bound,
-        _seq_lens_cpu=common_attn_metadata._seq_lens_cpu,
-        _num_computed_tokens_cpu=common_attn_metadata._num_computed_tokens_cpu,
-    )
-    return common_attn_metadata
-
-
 def split_decodes_prefills_and_extends(
     common_attn_metadata: CommonAttentionMetadata,
     decode_threshold: int = 1,
@@ -711,33 +538,6 @@ def split_decodes_and_prefills(
     return (num_decodes, num_prefills, num_decode_tokens, num_prefill_tokens)
 
 
-def split_prefill_chunks(
-    seq_lens_cpu: torch.Tensor, workspace_size: int, request_offset: int = 0
-) -> list[tuple[int, int]]:
-    """
-    Split the prefill requests into chunks such that the total sequence length
-    of each chunk is less than or equal to the workspace size.
-
-    Args:
-        seq_lens_cpu: The sequence lengths of the prefill requests on CPU.
-        workspace_size: The maximum workspace size (in tokens) per chunk.
-        request_offset: The offset to add to the request indices.
-    Returns:
-        A list of tuples of (reqs_start, reqs_end) representing chunk boundaries.
-    """
-    chunk_bounds = []
-    i, n = 0, len(seq_lens_cpu)
-    assert torch.all(seq_lens_cpu <= workspace_size).item()
-
-    while i < n:
-        start, chunk_total = i, 0
-        while i < n and (chunk_total + (s := seq_lens_cpu[i].item())) <= workspace_size:
-            chunk_total += s
-            i += 1
-        chunk_bounds.append((start + request_offset, i + request_offset))
-    return chunk_bounds
-
-
 def reshape_query_for_spec_decode(query: torch.Tensor, batch_size: int) -> torch.Tensor:
     """
     Reshapes the query tensor for the specified batch size, so that
@@ -767,117 +567,10 @@ def reshape_attn_output_for_spec_decode(attn_output: torch.Tensor) -> torch.Tens
     return attn_output.view(total_tokens, attn_output.shape[2], attn_output.shape[3])
 
 
-def subclass_attention_metadata(
-    name_prefix: str,
-    metadata_cls: Any,
-    fields: list[tuple[str, Any, Any]],
-) -> Any:
-    """
-    Return a new subclass of `metadata_cls` with additional fields
-    """
-    name: str = name_prefix + metadata_cls.__name__  # type: ignore
-    Wrapped = make_dataclass(name, fields, bases=(metadata_cls,))
-    return Wrapped
-
-
 @runtime_checkable
 class KVSharingFastPrefillMetadata(Protocol):
     logits_indices_padded: torch.Tensor | None = None
     num_logits_indices: int | None = None
-
-
-def create_fast_prefill_custom_backend(
-    prefix: str,
-    underlying_attn_backend: type[AttentionBackend],
-) -> type[AttentionBackend]:
-    underlying_builder = underlying_attn_backend.get_builder_cls()
-
-    class FastPrefillAttentionBuilder(underlying_builder):  # type: ignore
-        def build(
-            self,
-            common_prefix_len: int,
-            common_attn_metadata: CommonAttentionMetadata,
-            fast_build: bool = False,
-        ) -> AttentionMetadata:
-            new_common_attn_metadata = (
-                make_kv_sharing_fast_prefill_common_attn_metadata(common_attn_metadata)
-            )
-            metadata = super().build(
-                common_prefix_len, new_common_attn_metadata, fast_build
-            )
-
-            class KVSharingFastPrefillAttentionMetadata(
-                metadata.__class__,  #  type: ignore
-                KVSharingFastPrefillMetadata,
-            ):
-                def __init__(self, metadata, common_attn_metadata):
-                    # Shallow copy all fields in metadata cls
-                    for _field in fields(metadata.__class__):
-                        setattr(self, _field.name, getattr(metadata, _field.name))
-
-                    self.logits_indices_padded = (
-                        common_attn_metadata.logits_indices_padded
-                    )
-                    self.num_logits_indices = common_attn_metadata.num_logits_indices
-
-            return KVSharingFastPrefillAttentionMetadata(metadata, common_attn_metadata)
-
-    attn_backend = subclass_attention_backend(
-        name_prefix=prefix,
-        attention_backend_cls=underlying_attn_backend,
-        builder_cls=FastPrefillAttentionBuilder,
-    )
-
-    return attn_backend
-
-
-def compute_causal_conv1d_metadata(
-    query_start_loc_p_cpu: torch.Tensor, *, device: torch.device
-) -> tuple[dict[int, dict[str, Any]], torch.Tensor, torch.Tensor]:
-    # Needed for causal_conv1d. Use the CPU query_start_loc to avoid DtoH sync.
-    assert query_start_loc_p_cpu.device.type == "cpu"
-    seqlens = query_start_loc_p_cpu.diff()
-    nums_dict: dict[int, dict[str, Any]] = {}
-    batch_ptr = None
-    token_chunk_offset_ptr = None
-    for BLOCK_M in [8]:  # cover all BLOCK_M values
-        nums = -(-seqlens // BLOCK_M)
-        nums_dict[BLOCK_M] = {}
-        nums_dict[BLOCK_M]["nums"] = nums
-        nums_dict[BLOCK_M]["tot"] = nums.sum().item()
-        mlist = np_to_pinned_tensor(np.repeat(np.arange(len(nums)), nums))
-        nums_dict[BLOCK_M]["mlist"] = mlist
-        mlist_len = len(nums_dict[BLOCK_M]["mlist"])
-        nums_dict[BLOCK_M]["mlist_len"] = mlist_len
-        MAX_NUM_PROGRAMS = max(1024, mlist_len) * 2
-        offsetlist = []  # type: ignore
-        for idx, num in enumerate(nums):
-            offsetlist.extend(range(num))
-        offsetlist = torch.tensor(offsetlist, dtype=torch.int32, pin_memory=PIN_MEMORY)
-        nums_dict[BLOCK_M]["offsetlist"] = offsetlist
-
-        if batch_ptr is None:
-            # Update default value after class definition
-            batch_ptr = torch.full(
-                (MAX_NUM_PROGRAMS,), PAD_SLOT_ID, dtype=torch.int32, device=device
-            )
-            token_chunk_offset_ptr = torch.full(
-                (MAX_NUM_PROGRAMS,), PAD_SLOT_ID, dtype=torch.int32, device=device
-            )
-        else:
-            if batch_ptr.nelement() < MAX_NUM_PROGRAMS:
-                batch_ptr.resize_(MAX_NUM_PROGRAMS).fill_(PAD_SLOT_ID)
-                assert token_chunk_offset_ptr is not None
-                token_chunk_offset_ptr.resize_(MAX_NUM_PROGRAMS).fill_(PAD_SLOT_ID)
-
-        assert batch_ptr is not None
-        batch_ptr[0:mlist_len].copy_(mlist, non_blocking=True)
-        assert token_chunk_offset_ptr is not None
-        token_chunk_offset_ptr[0:mlist_len].copy_(offsetlist, non_blocking=True)
-        nums_dict[BLOCK_M]["batch_ptr"] = batch_ptr
-        nums_dict[BLOCK_M]["token_chunk_offset_ptr"] = token_chunk_offset_ptr
-
-    return nums_dict, batch_ptr, token_chunk_offset_ptr
 
 
 def get_dcp_local_seq_lens(
@@ -918,44 +611,3 @@ def get_dcp_local_seq_lens(
     )
     dcp_local_seq_lens = base + remainder
     return dcp_local_seq_lens
-
-
-def mamba_get_block_table_tensor(
-    block_table: torch.Tensor,
-    seq_lens: torch.Tensor,
-    kv_cache_spec: KVCacheSpec,
-    mamba_cache_mode: str,
-) -> torch.Tensor:
-    """
-    Get the block table tensor for mamba kernels from the input
-    common_attn_metadata.block_table_tensor given different mamba cache modes.
-
-    - "all":   input  (#requests, cdiv(max_model_len, block_size)
-                        + num_speculative_blocks);
-               output (#requests, cdiv(max_model_len, block_size)
-                        + num_speculative_blocks).
-
-    - "none":  input  (#requests, 1 + num_speculative_blocks);
-               output (#requests, 1 + num_speculative_blocks).
-
-    - "align": input  (#requests, cdiv(max_model_len, block_size));
-               output (#requests, 1 + num_speculative_blocks), which are the last
-               1 + num_speculative_blocks of each request.
-    """
-    if mamba_cache_mode in ("all", "none"):
-        return block_table
-    else:
-        assert isinstance(kv_cache_spec, MambaSpec)
-        # NOTE: For 0-length requests in CUDA graph, use a start_index of 0
-        # to handle the invalid block table.
-        start_indices = (seq_lens - 1) // kv_cache_spec.block_size
-        start_indices.clamp_(min=0)
-        # Use int32 for arithmetic to avoid dtype promotion overhead,
-        # then convert to int64 for gather (which requires Long indices)
-        offsets = torch.arange(
-            1 + kv_cache_spec.num_speculative_blocks,
-            device=block_table.device,
-            dtype=torch.int32,
-        )
-        indices_to_gather = (start_indices.unsqueeze(1) + offsets).to(torch.int64)
-        return torch.gather(block_table, 1, indices_to_gather)

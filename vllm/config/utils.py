@@ -206,23 +206,6 @@ class SupportsHash(Protocol):
 _config_hash_cache: dict[int, str] = {}
 
 
-def compute_hash_cached(config: SupportsHash) -> str:
-    """Cache config.compute_hash() by object identity.
-
-    Config objects (ModelConfig, etc.) are long-lived singletons that never
-    mutate after construction, but compute_hash() is expensive (JSON
-    serialization + SHA-256).  This utility avoids recomputing the hash on
-    every forward pass while keeping a single consistent key type for all
-    lookup paths.
-    """
-    key = id(config)
-    result = _config_hash_cache.get(key)
-    if result is None:
-        result = config.compute_hash()
-        _config_hash_cache[key] = result
-    return result
-
-
 class SupportsMetricsInfo(Protocol):
     def metrics_info(self) -> dict[str, str]: ...
 
@@ -415,31 +398,6 @@ class Range:
         return self.__str__()
 
 
-def handle_deprecated(
-    config: ConfigT,
-    old_name: str,
-    new_name_or_names: str | list[str],
-    removal_version: str,
-) -> None:
-    old_val = getattr(config, old_name)
-    if old_val is None:
-        return
-
-    if isinstance(new_name_or_names, str):
-        new_names = [new_name_or_names]
-    else:
-        new_names = new_name_or_names
-
-    msg = (
-        f"{old_name} is deprecated and will be removed in {removal_version}. "
-        f"Use {', '.join(new_names)} instead."
-    )
-    logger.warning(msg)
-
-    for new_name in new_names:
-        setattr(config, new_name, old_val)
-
-
 def get_from_deprecated_env_if_set(
     env_name: str,
     removal_version: str,
@@ -467,37 +425,3 @@ def get_from_deprecated_env_if_set(
         )
         return value
     return None
-
-
-def set_from_deprecated_env_if_set(
-    config: ConfigT,
-    env_name: str,
-    removal_version: str,
-    field_name: str,
-    to_bool: bool = False,
-    to_int: bool = False,
-) -> None:
-    """
-    Set object field from deprecated environment variable with warning.
-
-    Args:
-        config: Config object to set the field on
-        env_name: Name of the deprecated environment variable
-        removal_version: Version when the env var will be removed
-        field_name: Name of the field to set
-        to_bool: Whether to convert the environment variable value to boolean
-        to_int: Whether to convert the environment variable value to integer
-    Returns:
-        None
-    """
-    if to_bool and to_int:
-        raise ValueError("Cannot convert to both boolean and integer.")
-
-    env_value = get_from_deprecated_env_if_set(env_name, removal_version, field_name)
-    if env_value is not None:
-        field_value: str | bool | int = env_value
-        if to_bool:
-            field_value = env_value.lower() in ("1", "true")
-        elif to_int:
-            field_value = int(env_value)
-        setattr(config, field_name, field_value)

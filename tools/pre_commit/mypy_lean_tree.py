@@ -19,7 +19,6 @@ import sys
 from pathlib import Path
 
 BASELINE = (
-    "vllm/third_party/pynvml.py",  # vendored upstream
     "vllm/model_executor/models/utils.py",
     "vllm/model_executor/models/module_mapping.py",
     "vllm/model_executor/models/interfaces.py",

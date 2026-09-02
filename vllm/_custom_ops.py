@@ -117,50 +117,6 @@ if hasattr(torch.ops, "_C") and hasattr(torch.ops._C, "scaled_fp4_quant"):
 
 
 # page attention ops
-def paged_attention_rocm(
-    out: torch.Tensor,
-    exp_sum: torch.Tensor,
-    max_logits: torch.Tensor,
-    tmp_out: torch.Tensor,
-    query: torch.Tensor,
-    key_cache: torch.Tensor,
-    value_cache: torch.Tensor,
-    num_kv_heads: int,
-    scale: float,
-    block_tables: torch.Tensor,
-    seq_lens: torch.Tensor,
-    query_start_loc: torch.Tensor | None,
-    block_size: int,
-    max_seq_len: int,
-    alibi_slopes: torch.Tensor | None,
-    kv_cache_dtype: str,
-    k_scale: torch.Tensor,
-    v_scale: torch.Tensor,
-    fp8_out_scale: torch.Tensor | None = None,
-    mfma_type: str = "fp8" if envs.VLLM_ROCM_FP8_MFMA_PAGE_ATTN else "f16",
-) -> None:
-    torch.ops._rocm_C.paged_attention(
-        out,
-        exp_sum,
-        max_logits,
-        tmp_out,
-        query,
-        key_cache,
-        value_cache,
-        num_kv_heads,
-        scale,
-        block_tables,
-        seq_lens,
-        query_start_loc,
-        block_size,
-        max_seq_len,
-        alibi_slopes,
-        kv_cache_dtype,
-        k_scale,
-        v_scale,
-        fp8_out_scale,
-        mfma_type,
-    )
 
 
 def mla_decode_kvcache_cpu(
@@ -997,78 +953,6 @@ def cutlass_moe_mm(
     )
 
 
-def cutlass_fp4_moe_mm(
-    out_tensors: torch.Tensor,
-    a_tensors: torch.Tensor,
-    b_tensors: torch.Tensor,
-    a_scales: torch.Tensor,
-    b_scales: torch.Tensor,
-    alphas: torch.Tensor,
-    problem_sizes: torch.Tensor,
-    expert_offsets: torch.Tensor,
-    sf_offsets: torch.Tensor,
-):
-    """
-    An FP4 Blockscaled Group Gemm that takes in  a_tensors, b_tensors and runs
-    the gemms for each combination based on the specified problem sizes.
-
-    This is used as the MoE gemm during NVFP4 Quantized MoERunner forward.
-    - a/b_tensors: the NVFP4 a_ptrs and b_ptrs tensors which are quantized
-                     input and expert weights.
-    - a_/b_scales: The blockscales in FP8-E4M3 precision
-    - expert_offsets/sf_offsets: Indices that mark at which token index
-                    each expert begins its computation. The number of tokens
-                    computed with expert E is expert_offsets[E + 1] -
-                    expert_offsets[E] And the sf_size per expert is
-                    sf_offset[E+1] - sf_offset[E]
-    - problem_sizes: MxNxK sizes of each expert's multiplication in two grouped
-                     MMs used in the fused MoE operation.
-    """
-    return torch.ops._C.cutlass_fp4_group_mm(
-        out_tensors,
-        a_tensors,
-        b_tensors,
-        a_scales,
-        b_scales,
-        alphas,
-        problem_sizes,
-        expert_offsets,
-        sf_offsets,
-    )
-
-
-def cutlass_mxfp4_moe_mm(
-    out_tensors: torch.Tensor,
-    a_tensors: torch.Tensor,
-    b_tensors: torch.Tensor,
-    a_scales: torch.Tensor,
-    b_scales: torch.Tensor,
-    problem_sizes: torch.Tensor,
-    expert_offsets: torch.Tensor,
-    sf_offsets: torch.Tensor,
-):
-    """
-    An MXFP4 Blockscaled Group Gemm for MoE (MXFP4 x MXFP4).
-
-    Uses mx_float4_t types with E8M0 scale factors and 32-element blocks.
-    - a/b_tensors: MXFP4 packed activations/weights (uint8, 2 E2M1 per byte)
-    - a_/b_scales: E8M0 blockscales (uint8, stored in swizzled layout)
-    - Epilogue uses scalar alpha=1, beta=0 inside the CUDA op (no global scales).
-    - expert_offsets/sf_offsets: expert boundary indices
-    - problem_sizes: (num_experts, 3) with (M, N, K) per expert
-    """
-    return torch.ops._C.cutlass_mxfp4_group_mm(
-        out_tensors,
-        a_tensors,
-        b_tensors,
-        a_scales,
-        b_scales,
-        problem_sizes,
-        expert_offsets,
-        sf_offsets,
-    )
-
-
 # gptq_marlin
 def gptq_marlin_repack(
     b_q_weight: torch.Tensor,
@@ -1133,50 +1017,6 @@ if hasattr(torch.ops._C, "awq_marlin_repack"):
             dtype=b_q_weight.dtype,
             device=b_q_weight.device,
         )
-
-
-def gptq_marlin_moe_repack(
-    b_q_weight: torch.Tensor,
-    perm: torch.Tensor,
-    size_k: int,
-    size_n: int,
-    num_bits: int,
-    is_a_8bit: bool = False,
-) -> torch.Tensor:
-    num_experts = b_q_weight.shape[0]
-    assert size_k % 16 == 0
-    output = torch.empty(
-        (num_experts, size_k // 16, size_n * (num_bits // 2)),
-        device=b_q_weight.device,
-        dtype=b_q_weight.dtype,
-    )
-    for e in range(num_experts):
-        output[e] = torch.ops._C.gptq_marlin_repack(
-            b_q_weight[e], perm[e], size_k, size_n, num_bits, is_a_8bit
-        )
-    return output
-
-
-def awq_marlin_moe_repack(
-    b_q_weight: torch.Tensor,
-    perm: torch.Tensor,
-    size_k: int,
-    size_n: int,
-    num_bits: int,
-    is_a_8bit: bool = False,
-) -> torch.Tensor:
-    num_experts = b_q_weight.shape[0]
-    assert size_k % 16 == 0
-    output = torch.empty(
-        (num_experts, size_k // 16, size_n * (num_bits // 2)),
-        device=b_q_weight.device,
-        dtype=b_q_weight.dtype,
-    )
-    for e in range(num_experts):
-        output[e] = torch.ops._C.awq_marlin_repack(
-            b_q_weight[e], size_k, size_n, num_bits, is_a_8bit
-        )
-    return output
 
 
 def marlin_int4_fp8_preprocess(
@@ -1889,59 +1729,6 @@ def scaled_fp8_quant(
 
 
 # gptq allspark
-def allspark_repack_weight(
-    qweight: torch.Tensor,
-    scale: torch.Tensor,
-    zero_point: torch.Tensor | None = None,
-    has_zp: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Rearrange qweight, scale, and zero_point(if asymmetric) to n32k16 format
-    for Ampere W8A16 Fused Gemm kernel
-
-    Args:
-        qweight: uint8 weight tensor, original k x n format.
-        scale: fp16/bf16 weight scale tensor, 1 x n format.
-        zero_point: fp16/bf16 weight zero_point tensor, 1 x n format.
-            Must be provided for asymmetric quantization.
-        has_zp: if use symmetric quantization, has_zp = False.
-            if use asymmetric quantization, has_zp = True.
-
-    Returns:
-        tuple[torch.Tensor, torch.Tensor, torch.Tensor | None] :
-            rearranged weight, scale, and optionally zero_point.
-    """
-    K = qweight.shape[0]
-    N = qweight.shape[1]
-    N_32align = (N + 32 - 1) // 32 * 32
-
-    qweight_reorder = torch.empty(
-        (N_32align, K), device=qweight.device, dtype=qweight.dtype
-    )
-    scale_reorder = torch.empty((1, N_32align), device=scale.device, dtype=scale.dtype)
-    zero_point_reorder = None
-    if has_zp:
-        assert zero_point is not None, (
-            "zero_point must be provided for asymmetric quantization."
-        )
-        zero_point_reorder = torch.empty(
-            (1, N_32align), device=zero_point.device, dtype=zero_point.dtype
-        )
-
-    torch.ops._C.rearrange_kn_weight_as_n32k16_order(
-        qweight,
-        scale,
-        zero_point,
-        has_zp,
-        qweight_reorder,
-        scale_reorder,
-        zero_point_reorder,
-        K,
-        N,
-        N_32align,
-    )
-
-    return qweight_reorder, scale_reorder, zero_point_reorder
 
 
 def allspark_w8a16_gemm(
@@ -1973,61 +1760,6 @@ def allspark_w8a16_gemm(
 
 
 # int8
-def scaled_int8_quant(
-    input: torch.Tensor,
-    scale: torch.Tensor | None = None,
-    azp: torch.Tensor | None = None,
-    symmetric: bool = True,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
-    """
-    Quantize the input tensor to int8 and return the quantized tensor and scale, and maybe azp.
-
-    Args:
-        input: The input tensor to be quantized to int8.
-        scale: Optional scaling factor for the int8 quantization.
-            When not provided, we invoke dynamic-per-token quantization.
-        azp: Optional zero-point for the int8 quantization.
-            Must be provided for asymmetric quantization if `scale` is provided.
-        symmetric: Whether to use symmetric quantization (scale only, azp ignored).
-
-    Returns:
-      tuple[torch.Tensor, torch.Tensor, torch.Tensor | None] : Output int8 tensor, scales, and optionally azp.
-    """
-    if current_platform.is_xpu():
-        # XPU has no _C int8 quant op; use the torch.compile reference.
-        if not symmetric:
-            raise NotImplementedError(
-                "asymmetric int8 activation quantization is unsupported on XPU"
-            )
-        if scale is not None:
-            q = (input.to(torch.float32) / scale).round().clamp(-128, 127)
-            return q.to(torch.int8), scale, None
-
-        from vllm._xpu_ops import xpu_ops
-
-        q, scales, _ = xpu_ops.dynamic_per_token_int8_quant_ref(
-            input.contiguous(), True, 8
-        )
-        return q, scales.reshape(-1, 1).to(torch.float32), None
-
-    output = torch.empty_like(input, dtype=torch.int8)
-    if scale is not None:
-        # static-per-tensor quantization.
-        assert symmetric == (azp is None), (
-            "azp must only be provided for asymmetric quantization."
-        )
-        torch.ops._C.static_scaled_int8_quant(output, input, scale, azp)
-        return output, scale, azp
-
-    # dynamic-per-token quantization.
-    input_scales = torch.empty(
-        (input.numel() // input.shape[-1], 1), device=input.device, dtype=torch.float32
-    )
-    input_azp = None if symmetric else torch.empty_like(input_scales, dtype=torch.int32)
-    torch.ops._C.dynamic_scaled_int8_quant(
-        output, input.contiguous(), input_scales, input_azp
-    )
-    return output, input_scales, input_azp
 
 
 # mamba
@@ -3743,69 +3475,6 @@ def onednn_mm(
     return output
 
 
-def create_onednn_scaled_mm(
-    weight: torch.Tensor,  # [K, N]
-    weight_scales: torch.Tensor,
-    output_type: torch.dtype,
-    dynamic_quant: bool,
-    use_azp: bool,
-    primitive_cache_size: int = 128,
-) -> CPUDNNLGEMMHandler:
-    handler = CPUDNNLGEMMHandler()
-    handler.k, handler.n = weight.size()
-    # store the handler pointer in a tensor so it doesn't get inlined
-    handler.handler_tensor = torch.tensor(
-        torch.ops._C.create_onednn_scaled_mm_handler(
-            weight,
-            weight_scales,
-            output_type,
-            dynamic_quant,
-            use_azp,
-            primitive_cache_size,
-        ),
-        dtype=torch.int64,
-    )
-    return handler
-
-
-def onednn_scaled_int8_quant(
-    input: torch.Tensor,
-    scale: torch.Tensor | None = None,
-    azp: torch.Tensor | None = None,
-    symmetric: bool = True,
-):
-    """
-    Quantize the input tensor to int8 and return the quantized tensor and scale, and maybe azp.
-
-    Args:
-        input: The input tensor to be quantized to int8.
-        scale: Optional scaling factor for the int8 quantization.
-            When not provided, we invoke dynamic-per-token quantization.
-        azp: Optional zero-point for the int8 quantization.
-            Must be provided for asymmetric quantization if `scale` is provided.
-        symmetric: Whether to use symmetric quantization (scale only, azp ignored).
-
-    Returns:
-      tuple[torch.Tensor, torch.Tensor, torch.Tensor | None] : Output int8 tensor, scales, and optionally azp.
-    """
-    output = torch.empty_like(input, dtype=torch.int8)
-    token_num = input.numel() // input.shape[-1]
-    input = input.view((token_num, input.shape[-1]))
-    if scale is not None:
-        # static-per-tensor quantization.
-        assert symmetric == (azp is None), (
-            "azp must only be provided for asymmetric quantization."
-        )
-        torch.ops._C.static_scaled_int8_quant(output, input, scale, azp)
-        return output, scale, azp
-
-    # dynamic-per-token quantization.
-    input_scales = torch.empty((token_num, 1), device=input.device, dtype=torch.float32)
-    input_azp = None if symmetric else torch.empty_like(input_scales, dtype=torch.int32)
-    torch.ops._C.dynamic_scaled_int8_quant(output, input, input_scales, input_azp)
-    return output, input_scales, input_azp
-
-
 def onednn_scaled_mm(
     dnnl_handler: CPUDNNLGEMMHandler,
     x: torch.Tensor,
@@ -3826,39 +3495,6 @@ def onednn_scaled_mm(
     )
 
     return output
-
-
-def cpu_attn_get_scheduler_metadata(
-    num_reqs: int,
-    num_heads: int,
-    num_kv_heads: int,
-    head_dim: int,
-    seq_lens: torch.Tensor,
-    dtype: torch.dtype,
-    query_start_loc: torch.Tensor,
-    causal: bool,
-    sliding_window_size: int,
-    isa: str,
-    enable_kv_split: bool,
-    dynamic_causal: torch.Tensor | None = None,
-    kv_cache_dtype: str = "auto",
-) -> torch.Tensor:
-    scheduler_metadata = torch.ops._C.get_scheduler_metadata(
-        num_reqs,
-        num_heads,
-        num_kv_heads,
-        head_dim,
-        seq_lens,
-        dtype,
-        query_start_loc,
-        causal,
-        sliding_window_size,
-        isa,
-        enable_kv_split,
-        dynamic_causal,
-        kv_cache_dtype,
-    )
-    return scheduler_metadata
 
 
 def cpu_attn_reshape_and_cache(

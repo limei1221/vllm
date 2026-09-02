@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """This file is used for /tests and /benchmarks"""
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
@@ -11,7 +11,6 @@ import numpy
 import torch
 from torch import fx
 
-from vllm.distributed.parallel_state import get_ep_group, get_tp_group
 from vllm.platforms import current_platform
 from vllm.scalar_type import ScalarType, scalar_types
 
@@ -31,35 +30,6 @@ def weight_amax(
     """``max(|weight|)``, without materializing a full-size ``abs()``."""
     lo, hi = weight.aminmax(dim=dim, keepdim=keepdim)
     return torch.maximum(lo.abs(), hi.abs())
-
-
-def amax_for_tp_weight_quant(amax: torch.Tensor, is_sharded: bool) -> torch.Tensor:
-    """Reduce a weight ``amax`` over the TP group when the weight is sharded
-    along a dim the ``amax`` reduces over, so each shard derives the same scale
-    it would as part of the whole weight.
-    """
-    if is_sharded:
-        torch.distributed.all_reduce(
-            amax,
-            op=torch.distributed.ReduceOp.MAX,
-            group=get_tp_group().device_group,
-        )
-    return amax
-
-
-def amax_for_moe_weight_quant(amax: torch.Tensor, moe_tp_size: int) -> torch.Tensor:
-    """Reduce a per-expert weight ``amax`` over the ranks that tensor-shard the
-    MoE weights. That sharding is flattened over DP x PCP x TP, exactly the EP
-    group's span. Under EP ``moe_tp_size`` is 1 and each rank owns whole
-    experts, so no reduction is needed.
-    """
-    if moe_tp_size > 1:
-        torch.distributed.all_reduce(
-            amax,
-            op=torch.distributed.ReduceOp.MAX,
-            group=get_ep_group().device_group,
-        )
-    return amax
 
 
 def amax_for_moe_activation_quant(
@@ -550,49 +520,6 @@ def get_and_maybe_dequant_weights(
     return dequant_weights.T
 
 
-def pack_quantized_values_into_int32(
-    w_q: torch.Tensor, wtype: ScalarType, packed_dim: int = 0
-):
-    # move dim to pack to the end
-    perm = (*[i for i in range(len(w_q.shape)) if i != packed_dim], packed_dim)
-    inv_perm = tuple(perm.index(i) for i in range(len(perm)))
-    w_q_perm = w_q.permute(perm)
-
-    pack_factor = 32 // wtype.size_bits
-    mask = (1 << wtype.size_bits) - 1
-
-    new_shape_perm = list(w_q_perm.shape)
-    assert w_q_perm.shape[-1] % pack_factor == 0
-    new_shape_perm[-1] //= pack_factor
-
-    res = torch.zeros(new_shape_perm, dtype=torch.int32, device=w_q.device)
-    for i in range(pack_factor):
-        res |= (w_q_perm[..., i::pack_factor] & mask) << wtype.size_bits * i
-
-    return res.permute(inv_perm)
-
-
-def unpack_quantized_values_into_int32(
-    w_q: torch.Tensor, wtype: ScalarType, packed_dim: int = 0
-):
-    # move dim to pack to the end
-    perm = (*[i for i in range(len(w_q.shape)) if i != packed_dim], packed_dim)
-    inv_perm = tuple(perm.index(i) for i in range(len(perm)))
-    w_q_perm = w_q.permute(perm)
-
-    pack_factor = 32 // wtype.size_bits
-    mask = (1 << wtype.size_bits) - 1
-
-    new_shape_perm = list(w_q_perm.shape)
-    new_shape_perm[-1] *= pack_factor
-
-    res = torch.zeros(new_shape_perm, dtype=torch.int32, device=w_q.device)
-    for i in range(pack_factor):
-        res[..., i::pack_factor] = (w_q_perm >> wtype.size_bits * i) & mask
-
-    return res.permute(inv_perm)
-
-
 def is_layer_skipped(
     prefix: str,
     ignored_layers: list[str],
@@ -675,182 +602,8 @@ def get_pack_factor(num_bits):
     return 32 // num_bits
 
 
-def permute_rows(
-    q_w: torch.Tensor,
-    w_ref: torch.Tensor,
-    group_size: int,
-    test_perm: torch.Tensor | None = None,
-):
-    assert q_w.shape == w_ref.shape
-
-    orig_device = q_w.device
-    k_size, _ = q_w.shape
-
-    g_idx = torch.zeros((k_size,), dtype=torch.int32)
-    for i in range(k_size):
-        g_idx[i] = i // group_size
-
-    # Simulate act_order by doing a random permutation on K
-    rand_perm = test_perm if test_perm is not None else torch.randperm(k_size)
-
-    g_idx = g_idx[rand_perm].contiguous()
-    q_w = q_w[rand_perm, :].contiguous()
-    w_ref = w_ref[rand_perm, :].contiguous()
-
-    return (
-        w_ref.to(device=orig_device),
-        q_w.to(device=orig_device),
-        g_idx.to(device=orig_device),
-        rand_perm.to(device=orig_device),
-    )
-
-
-def quantize_weights(
-    w: torch.Tensor,
-    quant_type: ScalarType,
-    group_size: int | None,
-    zero_points: bool = False,
-    ref_zero_points_after_scales: bool = False,
-):
-    assert quant_type.is_integer(), (
-        "Floating point quantization may work but has not been tested"
-    )
-    assert not zero_points or group_size is not None, (
-        "to have group zero points, group_size must be provided "
-        "(-1 group_size is channelwise)"
-    )
-
-    orig_device = w.device
-    orig_type = w.dtype
-    size_k, size_n = w.shape
-
-    assert w.is_floating_point(), "w must be float"
-
-    if group_size == -1:
-        group_size = size_k
-
-    # Reshape to [groupsize, -1]
-    if group_size is not None and group_size < size_k:
-        w = w.reshape((-1, group_size, size_n))
-        w = w.permute(1, 0, 2)
-        w = w.reshape((group_size, -1))
-
-    # Compute scale for each group
-    max_val = torch.max(w, 0, keepdim=True).values
-    min_val = torch.min(w, 0, keepdim=True).values
-
-    max_q_val = quant_type.max()
-    min_q_val = quant_type.min()
-
-    w_s = torch.Tensor([1.0]).to(w.device)  # unscaled case
-    maybe_w_zp = None
-    if group_size is not None:
-        if zero_points:
-            assert not quant_type.is_signed() and quant_type.max() > 0
-            w_s = (max_val - min_val).clamp(min=1e-5) / quant_type.max()
-            maybe_w_zp = (
-                torch.round(torch.abs(min_val / w_s)).clamp(min_q_val, max_q_val).int()
-            )
-        else:
-            # If the bias is such that there are no possible negative/positive
-            #  values, set the max value to inf to avoid divide by 0
-            w_s = torch.max(
-                abs(max_val / (max_q_val if max_q_val != 0 else torch.inf)),
-                abs(min_val / (min_q_val if min_q_val != 0 else torch.inf)),
-            )
-
-    # Quantize
-    w_q = torch.round(w / w_s).int() + (maybe_w_zp if zero_points else 0)
-    w_q = torch.clamp(w_q, min_q_val, max_q_val)
-
-    # Compute ref (dequantized)
-    # For some kernels (namely Machete) the zero-points are applied after the
-    # scales are applied, for this case computing the reference in similar way
-    # allows us to use tighter error tolerances in our unit tests.
-    if ref_zero_points_after_scales and maybe_w_zp is not None:
-        w_ref = w_q.to(orig_type) * w_s - maybe_w_zp.to(orig_type) * w_s
-    else:
-        w_ref = (w_q - (maybe_w_zp if zero_points else 0)).to(orig_type) * w_s
-
-    if quant_type.has_bias():
-        w_q += quant_type.bias
-
-    # Restore original shapes
-    if group_size is not None and group_size < size_k:
-
-        def reshape_w(w):
-            w = w.reshape((group_size, -1, size_n))
-            w = w.permute(1, 0, 2)
-            w = w.reshape((size_k, size_n)).contiguous()
-            return w
-
-        w_q = reshape_w(w_q)
-        w_ref = reshape_w(w_ref)
-        w_s = w_s.reshape((-1, size_n)).contiguous()
-
-    if maybe_w_zp is not None:
-        maybe_w_zp = maybe_w_zp.reshape((-1, size_n)).contiguous()
-        maybe_w_zp = maybe_w_zp.to(device=orig_device)
-
-    return (
-        w_ref.to(device=orig_device),
-        w_q.to(device=orig_device),
-        w_s if group_size is not None else None,
-        maybe_w_zp,
-    )
-
-
 SUPPORTED_GPTQ_QUANT_TYPES = [scalar_types.uint4b8, scalar_types.uint8b128]
 SUPPORTED_GROUP_SIZES = [-1, 32, 64, 128]
-
-
-def gptq_quantize_weights(
-    w: torch.Tensor,
-    quant_type: ScalarType,
-    group_size: int,
-    act_order: bool,
-    test_perm: torch.Tensor | None = None,
-):
-    size_k, _ = w.shape
-
-    assert w.is_floating_point(), "w must be float"
-    assert quant_type in SUPPORTED_GPTQ_QUANT_TYPES, (
-        f"Unsupported gptq type = {quant_type}"
-    )
-    assert group_size in SUPPORTED_GROUP_SIZES + [size_k], (
-        f"Unsupported groupsize = {group_size}"
-    )
-
-    w_ref, w_q, w_s, _ = quantize_weights(w, quant_type, group_size)
-
-    # Apply act_order
-    g_idx = torch.empty(0, dtype=torch.int, device=w.device)
-    rand_perm = torch.empty(0, dtype=torch.int, device=w.device)
-    if act_order:
-        assert group_size < size_k, (
-            "For act_order, groupsize = {} must be less than size_k = {}".format(
-                group_size, size_k
-            )
-        )
-
-        w_ref, w_q, g_idx, rand_perm = permute_rows(w_q, w_ref, group_size, test_perm)
-
-    return w_ref, w_q, w_s, g_idx, rand_perm
-
-
-def sort_weights(q_w: torch.Tensor, g_idx: torch.Tensor):
-    orig_device = q_w.device
-
-    sort_indices = torch.argsort(g_idx).to(dtype=torch.int32)  # Sort based on g_idx
-
-    g_idx = g_idx[sort_indices].contiguous()
-    q_w = q_w[sort_indices, :].contiguous()
-
-    return (
-        q_w.to(device=orig_device),
-        g_idx.to(device=orig_device),
-        sort_indices.to(device=orig_device),
-    )
 
 
 def pack_rows(
@@ -877,63 +630,6 @@ def pack_rows(
     return q_res
 
 
-def pack_cols(
-    q_w: torch.Tensor,
-    num_bits: int,
-    size_k: int,
-    size_n: int,
-):
-    assert q_w.shape == (size_k, size_n)
-
-    pack_factor = get_pack_factor(num_bits)
-    assert size_n % pack_factor == 0
-
-    orig_device = q_w.device
-
-    q_w = q_w.cpu().numpy().astype(numpy.uint32)
-
-    q_res = numpy.zeros((size_k, size_n // pack_factor), dtype=numpy.uint32)
-
-    for i in range(pack_factor):
-        q_res |= q_w[:, i::pack_factor] << num_bits * i
-
-    q_res = torch.from_numpy(q_res.astype(numpy.int32)).to(orig_device)
-    q_res = q_res.contiguous()
-
-    return q_res
-
-
-def unpack_cols(
-    packed_q_w: torch.Tensor,
-    num_bits: int,
-    size_k: int,
-    size_n: int,
-):
-    pack_factor = get_pack_factor(num_bits)
-    assert size_n % pack_factor == 0
-    assert packed_q_w.shape == (size_k, size_n // pack_factor), (
-        "packed_q_w.shape = {} size_k = {}, size_n = {} pack_Factor = {}".format(
-            packed_q_w.shape, size_k, size_n, pack_factor
-        )
-    )
-
-    orig_device = packed_q_w.device
-
-    packed_q_w_cpu = packed_q_w.cpu().numpy().astype(numpy.uint32)
-    q_res = numpy.zeros((size_k, size_n), dtype=numpy.uint32)
-
-    mask = (1 << num_bits) - 1
-    for i in range(pack_factor):
-        vals = packed_q_w_cpu & mask
-        packed_q_w_cpu >>= num_bits
-        q_res[:, i::pack_factor] = vals
-
-    q_res = torch.from_numpy(q_res.astype(numpy.int32)).to(orig_device)
-    q_res = q_res.contiguous()
-
-    return q_res
-
-
 def gptq_pack(
     q_w: torch.Tensor,
     num_bits: int,
@@ -941,73 +637,3 @@ def gptq_pack(
     size_n: int,
 ):
     return pack_rows(q_w, num_bits, size_k, size_n)
-
-
-def awq_pack(
-    q_w: torch.Tensor,
-    num_bits: int,
-    size_k: int,
-    size_n: int,
-):
-    assert q_w.shape == (size_k, size_n)
-
-    # Interleave column dim (for the dequantize code) and pack it to int32
-    if num_bits == 4:
-        interleave = numpy.array([0, 2, 4, 6, 1, 3, 5, 7])
-    elif num_bits == 8:
-        interleave = numpy.array([0, 2, 1, 3])
-    else:
-        raise Exception("num_bits must be 4 or 8, got {}".format(num_bits))
-
-    q_w = q_w.reshape((-1, len(interleave)))[:, interleave].ravel()
-    q_w = q_w.reshape((-1, size_n)).contiguous()
-
-    return pack_cols(q_w, num_bits, size_k, size_n)
-
-
-def convert_bf16_scales_to_fp8(
-    quant_fp8: Callable, scales: torch.Tensor
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Convert a BF16 scale tensor into the pair of (fp8_scales, channel_scales)
-    expected by W4A8 GEMM kernels.
-    """
-    assert scales.is_contiguous(), (
-        f"scale tensor must be contiguous, got {scales.stride()=}"
-    )
-    assert scales.is_cuda, "scales must be on gpu"
-
-    orig_shape = scales.shape
-    k_groups = orig_shape[-1]
-    flat_scales = scales.view(-1, k_groups)
-
-    fp8_scales, chan_scales = quant_fp8(flat_scales)
-    fp8_scales = (fp8_scales.float() / 8.0).to(torch.float8_e4m3fn)
-    chan_scales *= 8.0
-
-    # restore original shape
-    fp8_scales = fp8_scales.view(orig_shape)
-    chan_scales = chan_scales.view(*orig_shape[:-1], -1)
-
-    return fp8_scales, chan_scales
-
-
-def convert_packed_uint4b8_to_signed_int4_inplace(t: torch.Tensor) -> torch.Tensor:
-    """
-    Convert int4b8 (packed to int32) to signed int4
-    """
-    assert t.is_cuda, "tensor must be on gpu"
-    assert t.dtype == torch.int32, f"expected int32 packed weights but got {t.dtype}"
-
-    # loop through the 8 4-bit nibbles in each int32 entry
-    for i in range(8):
-        shift = 4 * i
-        # extract the i-th 4-bit nibble
-        nib = (t >> shift) & 0xF
-        # clear the original nibble by masking out
-        t &= ~(0xF << shift)
-        # convert int4b8 [0..15] to signed int4 [-8..7] by subtracting 8
-        # and update in-place
-        t |= ((nib - 8) & 0xF) << shift
-
-    return t

@@ -3,7 +3,6 @@
 from dataclasses import dataclass
 from typing import TypeAlias
 
-import numpy as np
 import torch
 
 from vllm.config import ParallelConfig
@@ -58,60 +57,6 @@ def _pad_out_ubatch_slices(
     return ubatch_slices[:-1] + [
         UBatchSlice(padded_last_request_slice, padded_last_token_slice)
     ]
-
-
-def maybe_create_ubatch_slices(
-    should_ubatch: bool,
-    num_scheduled_tokens: np.ndarray,
-    num_tokens_padded: int,
-    num_reqs_padded: int,
-    num_ubatches: int,
-    split_point: list[int] | int | None = None,
-) -> tuple[UBatchSlices | None, UBatchSlices | None]:
-    if not should_ubatch:
-        return None, None
-
-    if split_point is None:
-        split_point = int(num_tokens_padded) // num_ubatches
-
-    token_split_points = [split_point * i for i in range(1, num_ubatches)]
-
-    # TODO(lucas): Refactor the gpu_model_runner.py so we can pass
-    # in cu_num_tokens directly (i.e. query_start_loc)
-    cu_num_tokens = np.zeros(len(num_scheduled_tokens) + 1, dtype=np.int32)
-    np.cumsum(num_scheduled_tokens, dtype=np.int32, out=cu_num_tokens[1:])
-
-    ubatch_slices = []
-    start_token = 0
-
-    # Add the end point to the split points to make iteration easier
-    all_points = token_split_points + [cu_num_tokens[-1]]
-
-    for end_token in all_points:
-        token_slice = slice(start_token, end_token)
-
-        # Determine request slices using exclusive stop semantics
-        # Ubatch includes requests whose tokens overlap [start_token, end_token)
-
-        # Start at the request that contains the start_token
-        # or the request starting exactly at start_token (if on boundary)
-        req_start = int(np.searchsorted(cu_num_tokens, start_token, side="right") - 1)
-
-        # Stop at the request that starts at or after end_token
-        req_stop = int(np.searchsorted(cu_num_tokens, end_token, side="left"))
-
-        req_slice = slice(req_start, req_stop)
-        ubatch_slices.append(UBatchSlice(req_slice, token_slice))
-
-        start_token = end_token
-
-    ubatch_slices_padded = _pad_out_ubatch_slices(
-        ubatch_slices, num_tokens_padded, num_reqs_padded
-    )
-
-    assert sum(s.num_tokens for s in ubatch_slices_padded) == num_tokens_padded
-
-    return ubatch_slices, ubatch_slices_padded
 
 
 def slice_query_start_locs(
@@ -246,20 +191,3 @@ def _make_metadata_with_slice(
         _seq_lens_cpu=seq_lens_cpu,
         _num_computed_tokens_cpu=num_computed_tokens_cpu,
     )
-
-
-def split_attn_metadata(
-    ubatch_slices: list[UBatchSlice],
-    common_attn_metadata: CommonAttentionMetadata,
-) -> list[CommonAttentionMetadata]:
-    """
-    Creates a new CommonAttentionMetadata instance that corresponds to the
-    requests for each UBatchSlice in ubatch_slices.
-
-    Note: This function does not modify common_attn_metadata
-    """
-    results = []
-    for ubatch_slice in ubatch_slices:
-        results.append(_make_metadata_with_slice(ubatch_slice, common_attn_metadata))
-
-    return results

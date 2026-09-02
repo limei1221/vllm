@@ -10,7 +10,6 @@ from vllm.model_executor.layers.quantization.utils.quant_utils import (
 from vllm.platforms import current_platform
 from vllm.triton_utils import tl, triton
 from vllm.utils.torch_utils import is_quantized_kv_cache
-from vllm.v1.kv_cache_interface import KVQuantMode
 
 FP8_MIN, FP8_MAX = get_fp8_min_max()
 
@@ -267,97 +266,6 @@ _PER_TOKEN_HEAD_QUANT_PARAMS: dict[torch.dtype, tuple[float, float]] = {
     torch.int8: (127.0, -128.0),
     FP8_DTYPE: (FP8_MAX, FP8_MIN),
 }
-
-
-def triton_reshape_and_cache_flash_per_token_head_quant(
-    key: torch.Tensor,  # [num_tokens, num_kv_heads, head_size]
-    value: torch.Tensor,  # [num_tokens, num_kv_heads, head_size_v]
-    key_cache: torch.Tensor,  # [num_blocks, block_size, num_kv_heads, head_size]
-    value_cache: torch.Tensor,  # [num_blocks, block_size, num_kv_heads, head_size_v]
-    k_scale_cache: torch.Tensor,  # [num_blocks, block_size, num_kv_heads] float32
-    v_scale_cache: torch.Tensor,  # [num_blocks, block_size, num_kv_heads] float32
-    slot_mapping: torch.Tensor,  # [num_tokens]
-    kv_quant_mode: KVQuantMode,
-):
-    """Quantize key/value per (token, head) and write to paged cache.
-
-    Computes one scale = absmax / QUANT_MAX per (token, head), stores
-    quantized data in key_cache/value_cache, and stores the float32
-    scale in k_scale_cache/v_scale_cache.
-
-    INT4 needs sub-byte packing + a Hadamard rotation, so it is handled by
-    its own kernel; INT8 / FP8 share this kernel, with the quantization
-    range (QUANT_MAX, QUANT_MIN) derived from the cache tensor dtype.
-    """
-    if kv_quant_mode == KVQuantMode.INT4_PER_TOKEN_HEAD:
-        from vllm.v1.attention.ops.int4_per_token_head import (
-            reshape_and_cache_int4,
-        )
-
-        reshape_and_cache_int4(
-            key,
-            value,
-            key_cache,
-            value_cache,
-            slot_mapping,
-            k_scale_cache=k_scale_cache,
-            v_scale_cache=v_scale_cache,
-        )
-        return
-
-    cache_dtype = key_cache.dtype
-    quant_params = _PER_TOKEN_HEAD_QUANT_PARAMS.get(cache_dtype)
-    if quant_params is None:
-        raise ValueError(
-            f"Per-token-head quantization not supported for cache dtype "
-            f"{cache_dtype}.  Supported: {list(_PER_TOKEN_HEAD_QUANT_PARAMS)}"
-        )
-    quant_max, quant_min = quant_params
-
-    num_tokens, num_kv_heads, head_size = key.shape
-    head_size_v = value.shape[2]
-    head_size_padded = triton.next_power_of_2(max(head_size, head_size_v))
-
-    block_size = key_cache.shape[1]
-
-    if current_platform.is_rocm() or current_platform.is_xpu():
-        num_warps = 4
-    else:
-        num_warps = min(16, max(1, head_size_padded // 32))
-
-    _reshape_cache_per_token_head[(num_tokens, num_kv_heads)](
-        key_ptr=key,
-        value_ptr=value,
-        key_cache_ptr=key_cache,
-        value_cache_ptr=value_cache,
-        k_scale_cache_ptr=k_scale_cache,
-        v_scale_cache_ptr=v_scale_cache,
-        slot_mapping_ptr=slot_mapping,
-        stride_key_tok=key.stride(0),
-        stride_key_head=key.stride(1),
-        stride_val_tok=value.stride(0),
-        stride_val_head=value.stride(1),
-        stride_kc_blk=key_cache.stride(0),
-        stride_kc_slot=key_cache.stride(1),
-        stride_kc_head=key_cache.stride(2),
-        stride_vc_blk=value_cache.stride(0),
-        stride_vc_slot=value_cache.stride(1),
-        stride_vc_head=value_cache.stride(2),
-        stride_ks_blk=k_scale_cache.stride(0),
-        stride_ks_slot=k_scale_cache.stride(1),
-        stride_ks_head=k_scale_cache.stride(2),
-        stride_vs_blk=v_scale_cache.stride(0),
-        stride_vs_slot=v_scale_cache.stride(1),
-        stride_vs_head=v_scale_cache.stride(2),
-        block_size=block_size,
-        head_size=head_size,
-        head_size_v=head_size_v,
-        HEAD_SIZE_PADDED=head_size_padded,
-        QUANT_MAX=quant_max,
-        QUANT_MIN=quant_min,
-        IS_INT_QUANT=cache_dtype == torch.int8,
-        num_warps=num_warps,
-    )
 
 
 def triton_reshape_and_cache_flash(

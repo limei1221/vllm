@@ -20,10 +20,9 @@ from typing import IO, Any
 
 import filelock
 import huggingface_hub.constants
-import numpy as np
 import regex as re
 import torch
-from safetensors.torch import load, load_file, safe_open, save_file
+from safetensors.torch import load, safe_open
 from tqdm.auto import tqdm
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
@@ -34,7 +33,6 @@ from vllm.config.load import (
     DEFAULT_SAFETENSORS_PREFETCH_NUM_THREADS,
     LoadConfig,
 )
-from vllm.distributed import get_tensor_model_parallel_rank, get_world_group
 from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization import (
     QuantizationConfig,
@@ -194,45 +192,6 @@ def _shared_pointers(tensors):
         if len(names) > 1:
             failing.append(names)
     return failing
-
-
-def convert_bin_to_safetensor_file(
-    pt_filename: str,
-    sf_filename: str,
-) -> None:
-    loaded = torch.load(pt_filename, map_location="cpu", weights_only=True)
-    if "state_dict" in loaded:
-        loaded = loaded["state_dict"]
-    shared = _shared_pointers(loaded)
-    for shared_weights in shared:
-        for name in shared_weights[1:]:
-            loaded.pop(name)
-
-    # For tensors to be contiguous
-    loaded = {k: v.contiguous() for k, v in loaded.items()}
-
-    dirname = os.path.dirname(sf_filename)
-    os.makedirs(dirname, exist_ok=True)
-    save_file(loaded, sf_filename, metadata={"format": "pt"})
-
-    # check file size
-    sf_size = os.stat(sf_filename).st_size
-    pt_size = os.stat(pt_filename).st_size
-    if (sf_size - pt_size) / pt_size > 0.01:
-        raise RuntimeError(
-            f"""The file size different is more than 1%:
-         - {sf_filename}: {sf_size}
-         - {pt_filename}: {pt_size}
-         """
-        )
-
-    # check if the tensors are the same
-    reloaded = load_file(sf_filename)
-    for k in loaded:
-        pt_tensor = loaded[k]
-        sf_tensor = reloaded[k]
-        if not torch.equal(pt_tensor, sf_tensor):
-            raise RuntimeError(f"The output tensors do not match for key {k}")
 
 
 # TODO(woosuk): Move this to other place.
@@ -589,25 +548,6 @@ def filter_duplicate_safetensors_files(
     return hf_weights_files
 
 
-def filter_files_not_needed_for_inference(hf_weights_files: list[str]) -> list[str]:
-    """
-    Exclude files that are not needed for inference.
-
-    See https://github.com/huggingface/transformers/blob/v4.34.0/src/transformers/trainer.py#L227-L233
-    """
-    blacklist = [
-        "training_args.bin",
-        "optimizer.bin",
-        "optimizer.pt",
-        "scheduler.pt",
-        "scaler.pt",
-    ]
-    hf_weights_files = [
-        f for f in hf_weights_files if not any(f.endswith(x) for x in blacklist)
-    ]
-    return hf_weights_files
-
-
 # explicitly use pure text format, with a newline at the end
 # this makes it impossible to see the animation in the progress bar
 # but will avoid messing up with multiprocessing, which wraps
@@ -619,52 +559,6 @@ def enable_tqdm(use_tqdm_on_load: bool):
     return use_tqdm_on_load and (
         not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
     )
-
-
-def np_cache_weights_iterator(
-    model_name_or_path: str,
-    cache_dir: str | None,
-    hf_folder: str,
-    hf_weights_files: list[str],
-    use_tqdm_on_load: bool,
-) -> Generator[tuple[str, torch.Tensor], None, None]:
-    """Iterate over the weights in the model np files.
-
-    Will dump the model weights to numpy files if they are not already dumped.
-    """
-    # Convert the model weights from torch tensors to numpy arrays for
-    # faster loading.
-    np_folder = os.path.join(hf_folder, "np")
-    os.makedirs(np_folder, exist_ok=True)
-    weight_names_file = os.path.join(np_folder, "weight_names.json")
-    # Use file lock to prevent multiple processes from
-    # dumping the same model weights to numpy at the same time.
-    with get_lock(model_name_or_path, cache_dir):
-        if not os.path.exists(weight_names_file):
-            weight_names: list[str] = []
-            for bin_file in tqdm(
-                hf_weights_files,
-                desc="Loading np_cache checkpoint shards",
-                disable=not enable_tqdm(use_tqdm_on_load),
-                bar_format=_BAR_FORMAT,
-            ):
-                state = torch.load(bin_file, map_location="cpu", weights_only=True)
-                for name, param in state.items():
-                    param_path = os.path.join(np_folder, name)
-                    with open(param_path, "wb") as f:
-                        np.save(f, param.cpu().detach().numpy())
-                    weight_names.append(name)
-            with open(weight_names_file, "w") as f:
-                json.dump(weight_names, f)
-
-    with open(weight_names_file) as f:
-        weight_names = json.load(f)
-
-    for name in weight_names:
-        param_path = os.path.join(np_folder, name)
-        with open(param_path, "rb") as f:
-            param = np.load(f)
-        yield name, torch.from_numpy(param)
 
 
 def _get_checkpoints_size_bytes(files: list[str]) -> int:
@@ -953,262 +847,6 @@ def safetensors_weights_iterator(
                     yield name, param
 
 
-def multi_thread_safetensors_weights_iterator(
-    hf_weights_files: list[str],
-    use_tqdm_on_load: bool,
-    max_workers: int = 4,
-) -> Generator[tuple[str, torch.Tensor], None, None]:
-    """Multi-Thread iterate over the weights in the model safetensor files."""
-
-    def _load_file(st_file: str):
-        result = load_file(st_file, device="cpu")
-        return result
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Note to use generator here so we do not store all the loaded files in memory
-        # at the same time, which can cause OOM for large models.
-        futures = (executor.submit(_load_file, st_file) for st_file in hf_weights_files)
-        futures_iter = tqdm(
-            concurrent.futures.as_completed(futures),
-            total=len(hf_weights_files),
-            desc="Multi-thread loading shards",
-            disable=not enable_tqdm(use_tqdm_on_load),
-            bar_format=_BAR_FORMAT,
-        )
-
-        for future in futures_iter:
-            state_dict = future.result()
-            del future
-            for key in list(state_dict):
-                yield key, state_dict.pop(key)
-
-
-def runai_safetensors_weights_iterator(
-    hf_weights_files: list[str],
-    use_tqdm_on_load: bool,
-    is_distributed: bool = False,
-) -> Generator[tuple[str, torch.Tensor], None, None]:
-    """Iterate over the weights in the model safetensor files."""
-    with SafetensorsStreamer() as streamer:
-        is_cuda_alike = current_platform.is_cuda_alike()
-        device = (
-            f"cuda:{current_platform.current_device()}"
-            if is_distributed and is_cuda_alike
-            else "cpu"
-        )
-
-        streamer.stream_files(
-            hf_weights_files,
-            device=device,
-            is_distributed=is_distributed,
-        )
-        total_tensors = sum(
-            len(tensors_meta)
-            for tensors_meta in streamer.files_to_tensors_metadata.values()
-        )
-
-        tensor_iter = tqdm(
-            streamer.get_tensors(),
-            total=total_tensors,
-            desc="Loading safetensors using Runai Model Streamer",
-            bar_format=_BAR_FORMAT,
-            disable=not enable_tqdm(use_tqdm_on_load),
-            mininterval=2,
-        )
-
-        for name, tensor in tensor_iter:
-            yield name, tensor.clone()
-
-
-def fastsafetensors_weights_iterator(
-    hf_weights_files: list[str],
-    use_tqdm_on_load: bool,
-) -> Generator[tuple[str, torch.Tensor], None, None]:
-    """Iterate over the weights in the model safetensor files
-    using fastsafetensor library.
-
-    Uses ParallelLoader for pipelined loading: the producer thread
-    prepares metadata for the next shard while the consumer yields
-    tensors from the current shard.
-    """
-    from fastsafetensors.parallel_loader import ParallelLoader
-
-    if torch.distributed.is_initialized():
-        pg = torch.distributed.group.WORLD
-    else:
-        pg = SingleGroup()
-
-    device = torch.device(f"cuda:{current_platform.current_device()}")
-    hf_weights_files = sorted(hf_weights_files, key=_natural_sort_key)
-
-    # Use nogds=True for TP > 1 to avoid cuFileDriverOpen() which
-    # initializes the GDS DMA subsystem for all visible GPUs, creating
-    # unwanted CUDA contexts on every device.
-    nogds = pg.size() > 1
-
-    queue_size = envs.VLLM_FASTSAFETENSORS_QUEUE_SIZE
-    tqdm_enabled = enable_tqdm(use_tqdm_on_load)
-
-    def _make_loader(nogds: bool) -> "ParallelLoader":
-        return ParallelLoader(
-            pg=pg,
-            hf_weights_files=hf_weights_files,
-            queue_size=queue_size,
-            use_tqdm_on_load=tqdm_enabled,
-            device=str(device),
-            nogds=nogds,
-        )
-
-    # GDS can fail either at construction or lazily inside the producer
-    # thread during iteration (e.g. cuFileHandleRegister returning
-    # CU_FILE_HANDLE_NOT_REGISTERED on a filesystem without GDS support).
-    # Catch both and fall back to nogds, but only before yielding any
-    # tensor -- restarting mid-stream would reload earlier shards.
-    pl = None
-    yielded = False
-    try:
-        try:
-            pl = _make_loader(nogds)
-            for name, tensor in pl.iterate_weights():
-                yielded = True
-                yield name, tensor
-        except RuntimeError as e:
-            if nogds or yielded or "gds" not in str(e):
-                raise
-            logger.warning_once(
-                "GDS not enabled, setting `nogds=True`.\n"
-                "For more information, see: https://github.com/foundation-model-stack/"
-                "fastsafetensors?tab=readme-ov-file#basic-api-usages"
-            )
-            if pl is not None:
-                pl.close()
-            pl = _make_loader(nogds=True)
-            yield from pl.iterate_weights()
-    finally:
-        if pl is not None:
-            pl.close()
-
-
-def instanttensor_weights_iterator(
-    hf_weights_files: list[str],
-    use_tqdm_on_load: bool,
-) -> Generator[tuple[str, torch.Tensor], None, None]:
-    """Iterate over the weights in the model safetensor files
-    using instanttensor library."""
-    try:
-        import instanttensor
-    except ImportError as e:
-        raise ImportError(
-            "Please install instanttensor via `pip install vllm[instanttensor]`"
-        ) from e
-
-    if not current_platform.is_cuda():
-        raise ValueError("InstantTensor requires NVIDIA GPUs")
-
-    try:
-        world_group = get_world_group()
-    except AssertionError:
-        # Entering here only in unit tests where the world group is not initialized.
-        process_group = None
-    else:
-        process_group = world_group.device_group if world_group.world_size > 1 else None
-
-    device = current_platform.current_device()
-
-    # copy=True yields tensors that own their memory, staying valid after the
-    # context exits or InstantTensor reuses its buffer.
-    with instanttensor.safe_open(
-        hf_weights_files,
-        framework="pt",
-        device=device,
-        process_group=process_group,
-        copy=True,
-    ) as f:
-        # Track bytes so the bar reports load throughput (GB/s).
-        pbar = tqdm(
-            total=f.total_tensor_size,
-            desc="Loading safetensors using InstantTensor loader",
-            disable=not enable_tqdm(use_tqdm_on_load),
-            bar_format=_BAR_FORMAT,
-            position=tqdm._get_free_pos(),
-            unit="B",
-            unit_scale=True,
-            unit_divisor=1024,
-            mininterval=1.0,
-        )
-        try:
-            for name, tensor in f.tensors():
-                pbar.update(tensor.numel() * tensor.element_size())
-                yield name, tensor
-        finally:
-            pbar.close()
-
-
-def pt_weights_iterator(
-    hf_weights_files: list[str],
-    use_tqdm_on_load: bool,
-    pt_load_map_location: str | dict[str, str] = "cpu",
-) -> Generator[tuple[str, torch.Tensor], None, None]:
-    """Iterate over the weights in the model bin/pt files."""
-    for bin_file in tqdm(
-        hf_weights_files,
-        desc="Loading pt checkpoint shards",
-        disable=not enable_tqdm(use_tqdm_on_load),
-        bar_format=_BAR_FORMAT,
-    ):
-        state = torch.load(
-            bin_file, map_location=pt_load_map_location, weights_only=True
-        )
-        yield from state.items()
-        del state
-
-
-def multi_thread_pt_weights_iterator(
-    hf_weights_files: list[str],
-    use_tqdm_on_load: bool,
-    pt_load_map_location: str | dict[str, str] = "cpu",
-    max_workers: int = 4,
-) -> Generator[tuple[str, torch.Tensor], None, None]:
-    """Multi-Thread iterate over the weights in the model bin/pt files."""
-
-    def _load_file(bin_file: str):
-        return torch.load(
-            bin_file, map_location=pt_load_map_location, weights_only=True
-        )
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(_load_file, bin_file) for bin_file in hf_weights_files
-        ]
-        futures_iter = tqdm(
-            concurrent.futures.as_completed(futures),
-            total=len(hf_weights_files),
-            desc="Multi-thread loading pt checkpoint shards",
-            disable=not enable_tqdm(use_tqdm_on_load),
-            bar_format=_BAR_FORMAT,
-        )
-
-        for future in futures_iter:
-            state = future.result()
-            yield from state.items()
-            del state
-
-
-def convert_pyslice_to_tensor(x: Any) -> torch.Tensor:
-    """convert PySafeSlice object from safetensors to torch.Tensor
-
-    PySafeSlice object supports indexing, which is done before loading the
-    actual tensor and can reduce the amount of memory being read into the
-    memory. However, it does not support more advanced functionalities
-    like `.view()` or `.t()`. Therefore, if we need to modify the loaded
-    tensor with these more complicated operators, we need to convert to
-    tensor first.
-    """
-    if not isinstance(x, torch.Tensor):
-        x = x[:]
-    return x
-
-
 def default_weight_loader(param: torch.Tensor, loaded_weight: torch.Tensor) -> None:
     """Default weight loader."""
     try:
@@ -1230,37 +868,7 @@ def default_weight_loader(param: torch.Tensor, loaded_weight: torch.Tensor) -> N
         raise
 
 
-def row_parallel_weight_loader(
-    param: torch.Tensor, loaded_weight: torch.Tensor
-) -> None:
-    """Load weights that are row-parallelized."""
-    tp_rank = get_tensor_model_parallel_rank()
-    shard_dim = 0 if param.dim() != 1 else None
-
-    if shard_dim is not None:
-        shard_size = param.data.shape[shard_dim]
-        start_idx = tp_rank * shard_size
-        loaded_weight = loaded_weight.narrow(shard_dim, start_idx, shard_size)
-
-    return default_weight_loader(param, loaded_weight)
-
-
 LoaderFunction = Callable[[torch.Tensor, torch.Tensor], None]
-
-
-def sharded_weight_loader(shard_axis: int) -> LoaderFunction:
-    """Create a weight loader that shards the weights along the given axis"""
-
-    def loader(param: torch.Tensor, loaded_weight: torch.Tensor) -> None:
-        tp_rank = get_tensor_model_parallel_rank()
-
-        shard_size = param.data.shape[shard_axis]
-        start_idx = tp_rank * shard_size
-        loaded_weight = loaded_weight.narrow(shard_axis, start_idx, shard_size)
-
-        return default_weight_loader(param, loaded_weight)
-
-    return loader
 
 
 def composed_weight_loader(
@@ -1274,29 +882,6 @@ def composed_weight_loader(
         return
 
     return composed_loader
-
-
-def initialize_dummy_weights(
-    model: torch.nn.Module,
-    model_config: ModelConfig,
-    low: float = -1e-3,
-    high: float = 1e-3,
-    seed: int = 1234,
-) -> None:
-    """Initialize model weights with random values.
-
-    The model weights must be randomly initialized for accurate performance
-    measurements. Additionally, the model weights should not cause NaNs in the
-    forward pass. We empirically found that initializing the weights with
-    values between -1e-3 and 1e-3 works well for most models.
-
-    We use per-parameter random seed, so that dummy weights are consistent,
-    even if the model is partitioned across multiple devices. When the seed
-    is fixed, the random values generated by this function only depends on
-    the parameter's number of elements and its data type.
-    """
-    for param in model.state_dict().values():
-        initialize_single_dummy_weight(param, low, high, seed)
 
 
 @torch.no_grad()

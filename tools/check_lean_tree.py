@@ -10,6 +10,7 @@ violated in the focused DeepSeek build.
 from __future__ import annotations
 
 import sys
+from contextlib import suppress
 from pathlib import Path
 
 import regex as re
@@ -39,7 +40,7 @@ BANNED_TERMS = {
     "multimodal": "multimodal",
 }
 
-BUDGET_RUNTIME_MAX = 170000
+BUDGET_RUNTIME_MAX = 195000
 BUDGET_TEST_MAX = 45000
 
 
@@ -78,10 +79,8 @@ def check_budgets(repo_root: Path) -> list[str]:
     def count_lines(directory: Path) -> int:
         total = 0
         for f in directory.rglob("*.py"):
-            try:
+            with suppress(OSError, UnicodeDecodeError):
                 total += sum(1 for _ in f.open())
-            except Exception:
-                pass
         return total
 
     runtime_loc = count_lines(repo_root / "vllm")

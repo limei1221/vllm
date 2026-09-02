@@ -11,17 +11,13 @@ from transformers import (
     AutoImageProcessor,
     AutoProcessor,
     AutoVideoProcessor,
-    BatchFeature,
     processing_utils,
 )
-from transformers.audio_utils import AudioInput
 from transformers.feature_extraction_utils import FeatureExtractionMixin
 from transformers.image_processing_utils import BaseImageProcessor
-from transformers.image_utils import ImageInput
 from transformers.models.auto.video_processing_auto import VIDEO_PROCESSOR_MAPPING_NAMES
 from transformers.processing_utils import ProcessorMixin
 from transformers.video_processing_utils import BaseVideoProcessor
-from transformers.video_utils import VideoInput
 from typing_extensions import TypeVar
 
 from vllm.logger import init_logger
@@ -378,20 +374,6 @@ def cached_get_processor_without_dynamic_kwargs(
     return final_processor
 
 
-def cached_processor_from_config(
-    model_config: "ModelConfig",
-    processor_cls: type[_P] | tuple[type[_P], ...] = ProcessorMixin,
-    **kwargs: Any,
-) -> _P:
-    return cached_get_processor_without_dynamic_kwargs(
-        model_config.model,
-        revision=model_config.revision,
-        trust_remote_code=model_config.trust_remote_code,
-        processor_cls=processor_cls,  # type: ignore[arg-type]
-        **_merge_mm_kwargs(model_config, processor_cls, **kwargs),
-    )
-
-
 def get_feature_extractor(
     processor_name: str,
     *args: Any,
@@ -429,18 +411,6 @@ def get_feature_extractor(
 
 
 cached_get_feature_extractor = lru_cache(get_feature_extractor)
-
-
-def cached_feature_extractor_from_config(
-    model_config: "ModelConfig",
-    **kwargs: Any,
-):
-    return cached_get_feature_extractor(
-        model_config.model,
-        revision=model_config.revision,
-        trust_remote_code=model_config.trust_remote_code,
-        **_merge_mm_kwargs(model_config, AutoFeatureExtractor, **kwargs),
-    )
 
 
 def get_image_processor(
@@ -484,18 +454,6 @@ def get_image_processor(
 cached_get_image_processor = lru_cache(get_image_processor)
 
 
-def cached_image_processor_from_config(
-    model_config: "ModelConfig",
-    **kwargs: Any,
-):
-    return cached_get_image_processor(
-        model_config.model,
-        revision=model_config.revision,
-        trust_remote_code=model_config.trust_remote_code,
-        **_merge_mm_kwargs(model_config, AutoImageProcessor, **kwargs),
-    )
-
-
 def get_video_processor(
     processor_name: str,
     *args: Any,
@@ -535,57 +493,3 @@ def get_video_processor(
 
 
 cached_get_video_processor = lru_cache(get_video_processor)
-
-
-def cached_video_processor_from_config(
-    model_config: "ModelConfig",
-    processor_cls: type[_V] | None = None,
-    **kwargs: Any,
-):
-    return cached_get_video_processor(
-        model_config.model,
-        revision=model_config.revision,
-        trust_remote_code=model_config.trust_remote_code,
-        processor_cls_overrides=processor_cls,  # type: ignore[arg-type]
-        **_merge_mm_kwargs(model_config, AutoVideoProcessor, **kwargs),
-    )
-
-
-def call_hf_processor_mm_only(
-    processor: ProcessorMixin,
-    images: ImageInput | None = None,
-    videos: VideoInput | None = None,
-    audio: AudioInput | None = None,
-    **kwargs,
-) -> BatchFeature:
-    output_kwargs = processor._merge_kwargs(
-        get_processor_kwargs_type(processor),
-        **kwargs,
-    )
-
-    if audio is not None and (
-        feature_extractor := getattr(processor, "feature_extractor", None)
-    ):
-        audio_inputs = feature_extractor(audio, **output_kwargs["audio_kwargs"])
-        audio_inputs["feature_attention_mask"] = audio_inputs.pop("attention_mask")
-    else:
-        audio_inputs = {}
-
-    if images is not None and (
-        image_processor := getattr(processor, "image_processor", None)
-    ):
-        images_inputs = image_processor(images=images, **output_kwargs["images_kwargs"])
-    else:
-        images_inputs = {}
-
-    if videos is not None and (
-        video_processor := getattr(processor, "video_processor", None)
-    ):
-        videos_inputs = video_processor(videos=videos, **output_kwargs["videos_kwargs"])
-    else:
-        videos_inputs = {}
-
-    return BatchFeature(
-        data={**audio_inputs, **images_inputs, **videos_inputs},
-        tensor_type=kwargs.get("return_tensors"),
-    )
