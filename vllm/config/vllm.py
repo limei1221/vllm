@@ -40,7 +40,6 @@ from .load import LoadConfig
 from .mamba import MambaBackendEnum, MambaConfig
 from .model import ModelConfig
 from .observability import ObservabilityConfig
-from .offload import OffloadConfig
 from .parallel import ParallelConfig
 from .profiler import ProfilerConfig
 from .reasoning import ReasoningConfig
@@ -313,7 +312,6 @@ class VllmConfig:
     """Device configuration."""
     load_config: LoadConfig = Field(default_factory=LoadConfig)
     """Load configuration."""
-    offload_config: OffloadConfig = Field(default_factory=OffloadConfig)
     """Model weight offloading configuration."""
     attention_config: AttentionConfig = Field(default_factory=AttentionConfig)
     """Attention configuration."""
@@ -424,10 +422,6 @@ class VllmConfig:
             vllm_factors.append("None")
         if self.load_config:
             vllm_factors.append(self.load_config.compute_hash())
-        else:
-            vllm_factors.append("None")
-        if self.offload_config:
-            vllm_factors.append(self.offload_config.compute_hash())
         else:
             vllm_factors.append("None")
         if self.attention_config:

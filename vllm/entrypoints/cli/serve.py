@@ -25,12 +25,6 @@ def cmd(args: argparse.Namespace) -> None:
     if getattr(args, "model_tag", None) is not None:
         args.model = args.model_tag
 
-    if args.grpc:
-        from vllm.entrypoints.grpc_server import serve_grpc
-
-        uvloop.run(serve_grpc(args))
-        return
-
     if args.headless:
         raise NotImplementedError(
             "Headless mode is not supported by this build; it exists to serve "

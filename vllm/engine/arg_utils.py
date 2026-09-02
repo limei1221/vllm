@@ -49,15 +49,12 @@ from vllm.config import (
     MambaConfig,
     ModelConfig,
     ObservabilityConfig,
-    OffloadConfig,
     ParallelConfig,
     PoolerConfig,
-    PrefetchOffloadConfig,
     ProfilerConfig,
     ReasoningConfig,
     SchedulerConfig,
     SpeculativeConfig,
-    UVAOffloadConfig,
     VllmConfig,
     WeightTransferConfig,
     get_attr_docs,
@@ -505,13 +502,6 @@ class EngineArgs:
     )
     disable_sliding_window: bool = ModelConfig.disable_sliding_window
     disable_cascade_attn: bool = ModelConfig.disable_cascade_attn
-    offload_backend: str = OffloadConfig.offload_backend
-    cpu_offload_gb: float = UVAOffloadConfig.cpu_offload_gb
-    cpu_offload_params: set[str] = get_field(UVAOffloadConfig, "cpu_offload_params")
-    offload_group_size: int = PrefetchOffloadConfig.offload_group_size
-    offload_num_in_group: int = PrefetchOffloadConfig.offload_num_in_group
-    offload_prefetch_step: int = PrefetchOffloadConfig.offload_prefetch_step
-    offload_params: set[str] = get_field(PrefetchOffloadConfig, "offload_params")
     gpu_memory_utilization: float = CacheConfig.gpu_memory_utilization
     kv_cache_memory_bytes: int | None = CacheConfig.kv_cache_memory_bytes
     max_num_batched_tokens: int | None = None
@@ -1158,37 +1148,6 @@ class EngineArgs:
         )
         cache_group.add_argument(
             "--kv-offloading-backend", **cache_kwargs["kv_offloading_backend"]
-        )
-
-        # Model weight offload related configs
-        offload_kwargs = get_kwargs(OffloadConfig)
-        uva_kwargs = get_kwargs(UVAOffloadConfig)
-        prefetch_kwargs = get_kwargs(PrefetchOffloadConfig)
-        offload_group = parser.add_argument_group(
-            title="OffloadConfig",
-            description=OffloadConfig.__doc__,
-        )
-        offload_group.add_argument(
-            "--offload-backend", **offload_kwargs["offload_backend"]
-        )
-        offload_group.add_argument("--cpu-offload-gb", **uva_kwargs["cpu_offload_gb"])
-        offload_group.add_argument(
-            "--cpu-offload-params", **uva_kwargs["cpu_offload_params"]
-        )
-        offload_group.add_argument(
-            "--offload-group-size",
-            **prefetch_kwargs["offload_group_size"],
-        )
-        offload_group.add_argument(
-            "--offload-num-in-group",
-            **prefetch_kwargs["offload_num_in_group"],
-        )
-        offload_group.add_argument(
-            "--offload-prefetch-step",
-            **prefetch_kwargs["offload_prefetch_step"],
-        )
-        offload_group.add_argument(
-            "--offload-params", **prefetch_kwargs["offload_params"]
         )
 
         # Observability arguments
@@ -2043,20 +2002,6 @@ class EngineArgs:
                 self.max_cudagraph_capture_size
             )
 
-        offload_config = OffloadConfig(
-            offload_backend=self.offload_backend,
-            uva=UVAOffloadConfig(
-                cpu_offload_gb=self.cpu_offload_gb,
-                cpu_offload_params=self.cpu_offload_params,
-            ),
-            prefetch=PrefetchOffloadConfig(
-                offload_group_size=self.offload_group_size,
-                offload_num_in_group=self.offload_num_in_group,
-                offload_prefetch_step=self.offload_prefetch_step,
-                offload_params=self.offload_params,
-            ),
-        )
-
         if self.gdn_prefill_backend is not None:
             self.additional_config["gdn_prefill_backend"] = self.gdn_prefill_backend
         if self.kda_prefill_backend is not None:
@@ -2078,7 +2023,6 @@ class EngineArgs:
             scheduler_config=scheduler_config,
             device_config=device_config,
             load_config=load_config,
-            offload_config=offload_config,
             attention_config=attention_config,
             mamba_config=mamba_config,
             kernel_config=kernel_config,

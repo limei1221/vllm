@@ -25,12 +25,6 @@ from vllm.config.model import (
     try_match_architecture_defaults,
 )
 from vllm.config.observability import ObservabilityConfig
-from vllm.config.offload import (
-    OffloadBackend,
-    OffloadConfig,
-    PrefetchOffloadConfig,
-    UVAOffloadConfig,
-)
 from vllm.config.parallel import EPLBConfig, ParallelConfig
 from vllm.config.pooler import PoolerConfig
 from vllm.config.profiler import ProfilerConfig
@@ -92,10 +86,6 @@ __all__ = [
     # From vllm.config.observability
     "ObservabilityConfig",
     # From vllm.config.offload
-    "OffloadBackend",
-    "OffloadConfig",
-    "PrefetchOffloadConfig",
-    "UVAOffloadConfig",
     # From vllm.config.parallel
     "EPLBConfig",
     "ParallelConfig",

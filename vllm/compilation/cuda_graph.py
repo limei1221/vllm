@@ -22,7 +22,6 @@ from vllm.forward_context import (
     is_forward_context_available,
 )
 from vllm.logger import init_logger
-from vllm.model_executor.offloader.base import get_offloader
 from vllm.platforms import current_platform
 from vllm.utils.torch_utils import current_stream, weak_ref_tensors
 
@@ -305,10 +304,6 @@ class CUDAGraphWrapper:
                 else:
                     set_graph_pool_id(current_platform.graph_pool_handle())
 
-                # Sync offloader's copy stream before capture.
-                # Ensure any pre-capture prefetches from offloader are complete.
-                get_offloader().sync_prev_onload()
-
                 # mind-exploding: carefully manage the reference and memory.
                 with torch.cuda.graph(
                     cudagraph,
@@ -317,11 +312,9 @@ class CUDAGraphWrapper:
                 ):
                     # `output` is managed by pytorch's cudagraph pool
                     output = self.runnable(*args, **kwargs)
-                    # Join offloader's copy stream after forward to avoid
                     # unjoined stream error. The last layer's start_prefetch
                     # forks copy_stream, but wait_prefetch only happens in
                     # the next forward pass.
-                    get_offloader().join_after_forward()
                     if self.cudagraph_options.weak_ref_output:
                         # by converting it to weak ref,
                         # the original `output` will immediately be released
@@ -354,8 +347,6 @@ class CUDAGraphWrapper:
                 f"got {new_input_addresses}"
             )
 
-        # Sync offloader before replay - ensures any external dependencies
         # from pre-capture prefetches are satisfied.
-        get_offloader().sync_prev_onload()
         entry.cudagraph.replay()
         return entry.output

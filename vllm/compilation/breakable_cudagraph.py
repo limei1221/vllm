@@ -42,7 +42,6 @@ from vllm.forward_context import (
     is_forward_context_available,
 )
 from vllm.logger import init_logger
-from vllm.model_executor.offloader.base import get_offloader
 from vllm.platforms import current_platform
 from vllm.utils.torch_utils import weak_ref_tensor, weak_ref_tensors
 
@@ -374,17 +373,13 @@ class BreakableCUDAGraphWrapper:
         # pre-`gc_disable` piecewise path.
         gc.collect()
         torch.accelerator.empty_cache()
-        # Sync the offloader's copy stream before capture so any in-flight
         # pre-capture prefetches are complete and don't leak into the graph.
-        get_offloader().sync_prev_onload()
 
         capture = BreakableCUDAGraphCapture(pool=self.graph_pool)
         with capture:
             output = self.runnable(*args, **kwargs)
-            # Join the offloader's copy stream while we still hold the last
             # segment open, so the join is captured into the graph (otherwise
             # we get an "unjoined stream" error on subsequent forwards).
-            get_offloader().join_after_forward()
             # Convert output to a weak ref *inside* the capture context so the
             # strong ref is dropped before the last segment closes, letting
             # the cudagraph pool reclaim/reuse that memory immediately for
@@ -416,9 +411,7 @@ class BreakableCUDAGraphWrapper:
                 f"for {entry.batch_descriptor}. Expected "
                 f"{entry.input_addresses}, got {new_addresses}."
             )
-        # Sync the offloader's copy stream before replay so any external
         # dependencies from pre-capture prefetches are satisfied.
-        get_offloader().sync_prev_onload()
         assert entry.capture is not None
         entry.capture.replay()
         return entry.output

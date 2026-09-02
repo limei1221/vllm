@@ -333,27 +333,6 @@ class CudaPlatformBase(Platform):
             )
             scheduler_config.disable_chunked_mm_input = True
 
-        if (
-            in_wsl()
-            and vllm_config.offload_config.uva.cpu_offload_gb > 0
-            and bool(vllm_config.compilation_config.cudagraph_mode)
-        ):
-            logger.warning_once(
-                "--cpu-offload-gb is enabled with CUDA graphs on WSL2. "
-                "This combination requires pinned (page-locked) memory "
-                "allocations. WARNING: Windows (WDDM) enforces a hard "
-                "system-wide cap of roughly 50%% of physical RAM on pinned "
-                "memory shared across ALL processes by default (limit can "
-                "changed via %%USERPROFILE%%\\.wslconfig). "
-                "Excessive use of page-locked memory can prevent Windows "
-                "from reclaiming memory under load, which can cause the "
-                "entire host OS to become unresponsive and may require a "
-                "hard reboot to recover. Proceed at your own risk. "
-                "To raise the WSL2 VM memory ceiling, increase the `memory` "
-                "setting in %%USERPROFILE%%\\.wslconfig and run "
-                "`wsl --shutdown`."
-            )
-
     @classmethod
     def get_current_memory_usage(
         cls, device: torch.types.Device | None = None

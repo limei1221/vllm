@@ -622,7 +622,6 @@ def make_layers(
     """
     from vllm.distributed.parallel_state import get_pp_group
     from vllm.distributed.utils import get_pp_indices
-    from vllm.model_executor.offloader import get_offloader
 
     start_layer, end_layer = get_pp_indices(
         num_hidden_layers, get_pp_group().rank_in_group, get_pp_group().world_size
@@ -630,9 +629,7 @@ def make_layers(
 
     modules = torch.nn.ModuleList(
         [PPMissingLayer() for _ in range(start_layer)]
-        + get_offloader().wrap_modules(
-            layer_fn(prefix=f"{prefix}.{idx}") for idx in range(start_layer, end_layer)
-        )
+        + [layer_fn(prefix=f"{prefix}.{idx}") for idx in range(start_layer, end_layer)]
         + [PPMissingLayer() for _ in range(end_layer, num_hidden_layers)]
     )
 
