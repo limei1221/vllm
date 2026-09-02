@@ -196,10 +196,7 @@ class UnquantizedLinearMethod(LinearMethodBase):
         set_weight_attrs(weight, extra_weight_attrs)
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
-        if current_platform.is_cpu():
-            from vllm.model_executor.layers.utils import dispatch_cpu_unquantized_gemm
-
-            dispatch_cpu_unquantized_gemm(layer, remove_weight=True)
+        pass
 
     def apply(
         self,

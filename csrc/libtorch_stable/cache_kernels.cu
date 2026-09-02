@@ -7,22 +7,13 @@
 #include "quantization/vectorization_utils.cuh"
 #include "concat_mla_q.cuh"
 
-#ifdef USE_ROCM
-  #include "../quantization/w8a8/fp8/amd/quant_utils.cuh"
-#else
-  #include "../quantization/w8a8/fp8/nvidia/quant_utils.cuh"
-#endif
+#include "../quantization/w8a8/fp8/nvidia/quant_utils.cuh"
 
 #include <algorithm>
 #include <cassert>
 #include <cfloat>
 
-#ifdef USE_ROCM
-  #include <hip/hip_bf16.h>
-typedef __hip_bfloat16 __nv_bfloat16;
-#else
-  #include <cuda.h>
-#endif
+#include <cuda.h>
 
 #if defined(__gfx942__)
 constexpr float kFp8ScaleDivisor = 224.f;

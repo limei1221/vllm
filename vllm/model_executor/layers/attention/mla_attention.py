@@ -983,13 +983,7 @@ class MLAAttention(nn.Module, AttentionLayerBase):
             if quant_idx == 0:
                 return quant_output
             actual = output[:quant_idx]
-            if quant_key == kNvfp4Dynamic:
-                # NVFP4: two FP4 values packed into one uint8
-                assert output_block_scale is not None
-                fp4_data, fp4_scales = ops.scaled_fp4_quant(actual, output_scale)
-                quant_output[:quant_idx].copy_(fp4_data)
-                output_block_scale[: fp4_scales.shape[0]].copy_(fp4_scales)
-            elif quant_key in (kFp8Dynamic128Sym, kFp8Dynamic64Sym):
+            if quant_key in (kFp8Dynamic128Sym, kFp8Dynamic64Sym):
                 # Per-group FP8
                 assert output_block_scale is not None
                 assert quant_group_size is not None, (

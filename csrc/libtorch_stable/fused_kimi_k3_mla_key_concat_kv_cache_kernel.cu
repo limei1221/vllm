@@ -60,13 +60,8 @@
 #include "dispatch_utils.h"
 #include "type_convert.cuh"
 
-#ifndef USE_ROCM
-  #include <cuda_fp8.h>
-  #include "../quantization/w8a8/fp8/nvidia/quant_utils.cuh"
-#else
-  #include <hip/hip_fp8.h>
-  #include "../quantization/w8a8/fp8/amd/quant_utils.cuh"
-#endif
+#include <cuda_fp8.h>
+#include "../quantization/w8a8/fp8/nvidia/quant_utils.cuh"
 #include <cuda_runtime.h>
 #include <cfloat>
 #include <type_traits>
