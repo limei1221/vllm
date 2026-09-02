@@ -10,7 +10,6 @@ import pytest
 
 from vllm.config.load import LoadConfig
 from vllm.model_executor.model_loader.safetensors_loader import (
-    ResolvedSafetensors,
     SafetensorsModelLoader,
 )
 
@@ -23,7 +22,7 @@ def safetensors_snapshot(tmp_path: Path) -> Path:
 
 def test_load_config_accepts_only_safetensors() -> None:
     assert LoadConfig().load_format == "safetensors"
-    with pytest.raises(ValueError, match="only safetensors"):
+    with pytest.raises(ValueError, match="only supports safetensors load format"):
         LoadConfig(load_format="pt")
 
 

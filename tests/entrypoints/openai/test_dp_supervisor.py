@@ -22,7 +22,7 @@ def test_local_dp_router_round_robins_healthy_engines() -> None:
 def test_local_dp_router_fails_when_engine_dies() -> None:
     router = LocalDPRouter(["engine-0"])
     router.mark_failed("engine-0")
-    with pytest.raises(RuntimeError, match="local DP engine failed"):
+    with pytest.raises(RuntimeError, match="All local DP engines have failed"):
         router.next_engine()
 
 

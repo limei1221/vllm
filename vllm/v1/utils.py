@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+from __future__ import annotations
+
 import argparse
 import contextlib
 import multiprocessing
@@ -394,9 +396,9 @@ def run_api_server_worker_proc(
 
 
 def wait_for_completion_or_failure(
-    api_server_manager: "APIServerProcessManager",
-    engine_manager: "CoreEngineProcManager" | None = None,
-    coordinator: "DPCoordinator | None" = None,
+    api_server_manager: APIServerProcessManager,
+    engine_manager: CoreEngineProcManager | None = None,
+    coordinator: DPCoordinator | None = None,
 ) -> None:
     """Wait for all processes to complete or detect if any fail.
 
