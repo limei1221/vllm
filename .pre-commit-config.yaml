@@ -120,7 +120,7 @@ repos:
     name: Check SPDX headers
     entry: python tools/pre_commit/check_spdx_header.py
     language: python
-    types_or: [python, rust, proto]
+    types_or: [python, proto]
   - id: check-root-lazy-imports
     name: Check root lazy imports
     entry: python tools/pre_commit/check_init_lazy_imports.py
@@ -188,32 +188,6 @@ repos:
     pass_filenames: false
     require_serial: true
     additional_dependencies: ["mypy==1.20.2", regex, types-cachetools, types-setuptools, types-PyYAML, types-requests, types-torch, pydantic]
-  # Rust hooks. These shell out to `cargo`; tools/pre_commit/rust-check.sh
-  # skips with a warning when cargo is not installed.
-  - id: rust-cargo-autoinherit
-    name: Rust - Normalize Cargo manifests with autoinherit
-    entry: tools/pre_commit/rust-check.sh autoinherit --prefer-simple-dotted
-    language: script
-    pass_filenames: false
-    require_serial: true
-    stages: [pre-commit] # Only run locally as Buildkite will cover this
-    files: ^rust/(Cargo\.toml|src/.*/Cargo\.toml)$
-  - id: rust-cargo-sort
-    name: Rust - Sort Cargo manifest sections
-    entry: tools/pre_commit/rust-check.sh sort --workspace
-    language: script
-    pass_filenames: false
-    require_serial: true
-    stages: [pre-commit] # Only run locally as Buildkite will cover this
-    files: ^rust/(Cargo\.toml|src/.*/Cargo\.toml)$
-  - id: rust-cargo-fmt
-    name: Rust - Format code
-    entry: tools/pre_commit/rust-check.sh fmt
-    language: script
-    pass_filenames: false
-    require_serial: true
-    stages: [pre-commit] # Only run locally as Buildkite will cover this
-    files: ^rust/.*(\.rs|Cargo\.toml|rustfmt\.toml)$
   # Keep `suggestion` last
   - id: suggestion
     name: Suggestion

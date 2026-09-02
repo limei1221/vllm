@@ -482,15 +482,6 @@ def mxfp4_quantize(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     if current_platform.is_xpu():
         return xpu_mxfp4_quantize(x)
 
-    from vllm._aiter_ops import is_aiter_found_and_supported
-
-    if is_aiter_found_and_supported() and x.dtype == torch.bfloat16:
-        from vllm.model_executor.layers.quantization.quark.utils import (
-            quark_quantize_weight_to_mxfp4,
-        )
-
-        return quark_quantize_weight_to_mxfp4(x)
-
     quant_tensor, scale, _ = downcast_to_mxfp(x, axis=-1)
 
     return quant_tensor, scale

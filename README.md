@@ -7,84 +7,87 @@
 </p>
 
 <h3 align="center">
-Easy, fast, and cheap LLM serving for everyone
+A lean vLLM: DeepSeek on Hopper, and nothing else
 </h3>
-
-<p align="center">
-| <a href="https://docs.vllm.ai"><b>Documentation</b></a> | <a href="https://blog.vllm.ai/"><b>Blog</b></a> | <a href="https://arxiv.org/abs/2309.06180"><b>Paper</b></a> | <a href="https://x.com/vllm_project"><b>Twitter/X</b></a> | <a href="https://discuss.vllm.ai"><b>User Forum</b></a> | <a href="https://slack.vllm.ai"><b>Developer Slack</b></a> |
-</p>
-
-🔥 We have built a vLLM website to help you get started with vLLM. Please visit [vllm.ai](https://vllm.ai) to learn more.
-For events, please visit [vllm.ai/events](https://vllm.ai/events) to join us.
 
 ---
 
 ## About
 
-vLLM is a fast and easy-to-use library for LLM inference and serving.
+This is a **stripped-down fork of [vLLM](https://github.com/vllm-project/vllm)**, cut
+down to a single coherent inference path so the engine can be read end to end. It is a
+learning and research tree, **not** a drop-in replacement for upstream vLLM — most of
+what upstream supports has been deliberately deleted.
 
-Originally developed in the [Sky Computing Lab](https://sky.cs.berkeley.edu) at UC Berkeley, vLLM has grown into one of the most active open-source AI projects built and maintained by a diverse community of many dozens of academic institutions and companies from over 2000 contributors.
+If you want vLLM for production, use [upstream](https://github.com/vllm-project/vllm).
 
-vLLM is fast with:
+## What this tree supports
 
-- State-of-the-art serving throughput
-- Efficient management of attention key and value memory with [**PagedAttention**](https://blog.vllm.ai/2023/06/20/vllm.html)
-- Continuous batching of incoming requests, chunked prefill, prefix caching
-- Fast and flexible model execution with piecewise and full CUDA/HIP graphs
-- Quantization: FP8, MXFP8/MXFP4, NVFP4, INT8, INT4, GPTQ/AWQ, GGUF, compressed-tensors, ModelOpt, TorchAO, and [more](https://docs.vllm.ai/en/latest/features/quantization/index.html)
-- Optimized attention kernels including FlashAttention, FlashInfer, TRTLLM-GEN, FlashMLA, and Triton
-- Optimized GEMM/MoE kernels for various precisions using CUTLASS, TRTLLM-GEN, CuTeDSL
-- Speculative decoding including n-gram, suffix, EAGLE, DFlash
-- Automatic kernel generation and graph-level transformations using torch.compile
-- Disaggregated prefill, decode, and encode
+- **Models**: DeepSeek V2/V3 only, plus MTP and EAGLE speculative decoding
+- **Hardware**: NVIDIA Hopper (SM90) only, CUDA only
+- **Quantization**: BF16 and FP8 only (DeepGEMM for FP8 MoE, Triton for BF16)
+- **Attention**: FlashAttention for prefill, FlashMLA for decode
+- **Weights**: safetensors only
+- **Parallelism**: local TP, PP, DP, EP, PCP, DCP — single node
+- **Executors**: `MultiprocExecutor` (multi-GPU), `UniProcExecutor` (single-GPU)
+- **All2all**: `allgather_reducescatter` only
+- **Server**: five HTTP routes — `/v1/chat/completions`, `/v1/completions`,
+  `/v1/models`, `/health`, `/metrics`
+- **Offline API**: `LLM.generate()` and `LLM.chat()`
 
-vLLM is flexible and easy to use with:
+## What has been removed
 
-- Seamless integration with popular Hugging Face models
-- High-throughput serving with various decoding algorithms, including *parallel sampling*, *beam search*, and more
-- Tensor, pipeline, data, expert, and context parallelism for distributed inference
-- Streaming outputs
-- Generation of structured outputs using xgrammar or guidance
-- Tool calling and reasoning parsers
-- OpenAI-compatible API server, plus Anthropic Messages API and gRPC support
-- Efficient multi-LoRA support for dense and MoE layers
-- Support for NVIDIA GPUs, AMD GPUs, Intel GPUs, and x86/ARM/PowerPC CPUs. Additionally, diverse hardware plugins such as Google TPUs, Intel Gaudi, IBM Spyre, Huawei Ascend, Rebellions NPU, Apple Silicon, MetaX GPU, and more.
+LoRA · multimodal · pooling and embedding models · structured outputs and grammar
+backends · beam search · the model zoo beyond DeepSeek · non-FP8 quantization
+(GPTQ/AWQ/GGUF/INT8/…) · ROCm, TPU, CPU and every non-CUDA backend · Ray and other
+alternate executors · KV-connector backends and disaggregated prefill · NIXL and the
+other all2all backends · the Rust frontend · the benchmark suite.
 
-vLLM seamlessly supports 200+ model architectures on Hugging Face, including:
+Attempting to use a removed feature should raise a clear error rather than silently
+misbehave. If you find one that fails quietly, that is a bug worth reporting.
 
-- Decoder-only LLMs (e.g., Llama, Qwen, Gemma)
-- Mixture-of-Expert LLMs (e.g., Mixtral, DeepSeek-V3, Qwen-MoE, GPT-OSS)
-- Hybrid attention and state-space models (e.g., Mamba, Qwen3.5)
-- Multi-modal models (e.g., LLaVA, Qwen-VL, Pixtral)
-- Embedding and retrieval models (e.g., E5-Mistral, GTE, ColBERT)
-- Reward and classification models (e.g., Qwen-Math)
+## Getting started
 
-Find the full list of supported models [here](https://docs.vllm.ai/en/latest/models/supported_models.html).
-
-## Getting Started
-
-Install vLLM with [`uv`](https://docs.astral.sh/uv/) (recommended) or `pip`:
+Build from source — there is no published wheel for this fork:
 
 ```bash
-uv pip install vllm
+uv venv --python 3.12 && source .venv/bin/activate
+VLLM_USE_PRECOMPILED=1 uv pip install -e . --torch-backend=auto
 ```
 
-Or [build from source](https://docs.vllm.ai/en/latest/getting_started/installation/gpu/index.html#build-wheel-from-source) for development.
+Serve a model:
 
-Visit our [documentation](https://docs.vllm.ai/en/latest/) to learn more.
+```bash
+vllm serve deepseek-ai/DeepSeek-V2-Lite-Chat --tensor-parallel-size 2
+```
 
-- [Installation](https://docs.vllm.ai/en/latest/getting_started/installation.html)
-- [Quickstart](https://docs.vllm.ai/en/latest/getting_started/quickstart.html)
-- [List of Supported Models](https://docs.vllm.ai/en/latest/models/supported_models.html)
+See [`examples/lean/`](examples/lean/) for a runnable offline script and a serving
+script, and [`docs/lean/architecture.md`](docs/lean/architecture.md) for the request
+flow and the design decisions behind the cuts.
 
-## Contributing
+## Keeping the tree lean
 
-We welcome and value any contributions and collaborations.
-Please check out [Contributing to vLLM](https://docs.vllm.ai/en/latest/contributing/index.html) for how to get involved.
+Two pre-commit hooks guard the invariants:
 
-## Citation
+- `lean-tree-guard` — [`tools/check_lean_tree.py`](tools/check_lean_tree.py) fails if a
+  removed subsystem reappears by path or by name.
+- `mypy-lean-tree` — type-checks the whole `vllm` package, not just changed files, so a
+  caller and callee cannot drift apart across separate commits.
 
-If you use vLLM for your research, please cite our [paper](https://arxiv.org/abs/2309.06180):
+```bash
+uv pip install -r requirements/lint.txt && pre-commit install
+pre-commit run --all-files
+```
+
+The guard also tracks a runtime line-count budget
+(`python tools/check_lean_tree.py --budgets`). It does **not** pass yet — the tree is
+roughly 240k lines against a 170k target — so it is not wired into the hooks.
+
+## Upstream
+
+vLLM was originally developed in the [Sky Computing Lab](https://sky.cs.berkeley.edu)
+at UC Berkeley and is maintained by a large open-source community. All credit for the
+engine belongs there; this fork only deletes.
 
 ```bibtex
 @inproceedings{kwon2023efficient,
@@ -94,17 +97,3 @@ If you use vLLM for your research, please cite our [paper](https://arxiv.org/abs
   year={2023}
 }
 ```
-
-## Contact Us
-
-<!-- --8<-- [start:contact-us] -->
-- For technical questions and feature requests, please use GitHub [Issues](https://github.com/vllm-project/vllm/issues)
-- For discussing with fellow users, please use the [vLLM Forum](https://discuss.vllm.ai)
-- For coordinating contributions and development, please use [Slack](https://slack.vllm.ai)
-- For security disclosures, please use GitHub's [Security Advisories](https://github.com/vllm-project/vllm/security/advisories) feature
-- For collaborations and partnerships, please contact us at [collaboration@vllm.ai](mailto:collaboration@vllm.ai)
-<!-- --8<-- [end:contact-us] -->
-
-## Media Kit
-
-- If you wish to use vLLM's logo, please refer to [our media kit repo](https://github.com/vllm-project/media-kit)

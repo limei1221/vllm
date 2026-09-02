@@ -131,7 +131,7 @@ RUN dnf install -y --setopt=install_weak_deps=False \
     && dnf clean all \
     && rm -rf /var/cache/dnf
 
-# Install sccache once in base so Rust and CMake/CUDA build stages share the
+# Install sccache once in base so the CMake/CUDA build stages share the
 # same binary and remote cache configuration.
 RUN if [ "$USE_SCCACHE" = "1" ]; then \
         echo "Installing sccache..." \
@@ -248,61 +248,6 @@ ARG torch_cuda_arch_list='7.5 8.0 8.6 8.9 9.0 10.0 11.0 12.0'
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 #################### BUILD BASE IMAGE ####################
 
-#################### RUST BUILD IMAGE ####################
-# Build the Rust frontend (`vllm-rs`) in a dedicated stage so the main wheel
-# build stage doesn't need the rust toolchain, protoc, or the rust source.
-# This stage reuses the Python environment from base and runs in parallel with
-# csrc-build/extensions-build.
-FROM base AS rust-build
-ARG USE_SCCACHE
-ARG SCCACHE_ENDPOINT
-
-# Install native tools needed only for Rust/protoc builds.
-RUN dnf install -y --setopt=install_weak_deps=False make unzip \
-    && dnf clean all \
-    && rm -rf /var/cache/dnf
-
-COPY tools/install_protoc.sh /tmp/install_protoc.sh
-RUN /tmp/install_protoc.sh && rm /tmp/install_protoc.sh
-
-WORKDIR /workspace
-
-COPY requirements/build/rust.txt requirements/build/rust.txt
-RUN --mount=type=cache,target=/opt/uv/cache \
-    uv pip install --python /opt/venv/bin/python3 -r requirements/build/rust.txt
-
-# Copy only the Rust build inputs; build_rust.sh publishes artifacts needed
-# by the wheel build stage.
-COPY rust rust
-COPY rust-toolchain.toml rust-toolchain.toml
-COPY tools/build_rust.py tools/build_rust.py
-COPY build_rust.sh build_rust.sh
-
-# Cap cargo parallelism to avoid exhausting the CI host's open-file limit
-# (rustc spawns enough concurrent processes to hit RLIMIT_NOFILE otherwise).
-ENV CARGO_BUILD_JOBS=4
-
-# BuildKit can run this stage in parallel with csrc-build. Keep Rust on a
-# separate local sccache daemon while sharing the same remote cache backend.
-ENV SCCACHE_SERVER_PORT=4227
-
-# Build the release artifacts. Cache cargo registry/git, but not target/,
-# because stale target metadata can outlive source updates across BuildKit
-# cache reuse.
-RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
-    --mount=type=cache,target=/root/.cargo/git,sharing=locked \
-    --mount=type=secret,id=aws-credentials,target=/root/.aws/credentials,required=false \
-    if [ "$USE_SCCACHE" = "1" ]; then \
-        if [ -n "${SCCACHE_ENDPOINT}" ]; then export SCCACHE_ENDPOINT="${SCCACHE_ENDPOINT}"; fi; \
-        export RUSTC_WRAPPER=sccache; \
-        sccache --show-stats; \
-    fi \
-    && bash build_rust.sh \
-    && if [ "$USE_SCCACHE" = "1" ]; then \
-        sccache --show-stats; \
-    fi
-#################### RUST BUILD IMAGE ####################
-
 #################### CSRC BUILD IMAGE ####################
 FROM base AS csrc-build
 
@@ -342,7 +287,6 @@ RUN --mount=type=cache,target=/opt/uv/cache \
 WORKDIR /workspace
 
 COPY pyproject.toml setup.py CMakeLists.txt ./
-COPY tools/build_rust.py tools/build_rust.py
 COPY cmake cmake/
 COPY csrc csrc/
 COPY vllm/envs.py vllm/envs.py
@@ -494,11 +438,6 @@ WORKDIR /workspace
 # Copy pre-built csrc wheel directly
 COPY --from=csrc-build /workspace/dist /precompiled-wheels
 COPY . .
-
-# Drop the pre-built Rust artifacts into the source tree. setup.py detects
-# them and ships them as-is, skipping the local Rust build.
-COPY --from=rust-build /workspace/vllm/vllm-rs vllm/vllm-rs
-COPY --from=rust-build /workspace/vllm/_rust_*.so vllm/
 
 ARG GIT_REPO_CHECK=0
 RUN --mount=type=bind,source=.git,target=.git \

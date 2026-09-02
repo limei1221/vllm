@@ -136,6 +136,32 @@ ResponseInputOutputMessage: TypeAlias = (
 ResponseInputOutputItem: TypeAlias = ResponseInputItemParam | ResponseOutputItem
 
 
+def _should_continue_final_message(
+    request_input: "str | list[ResponseInputOutputItem]",
+) -> bool:
+    """Whether the last input item is a partial assistant message to continue.
+
+    Mirrors Anthropic-style partial completion: an assistant message or
+    reasoning item left "in_progress"/"incomplete" is continued rather than
+    starting a fresh generation.
+    """
+    if isinstance(request_input, str) or not request_input:
+        return False
+
+    last_item = request_input[-1]
+
+    if isinstance(last_item, (ResponseOutputMessage, ResponseReasoningItem)):
+        return last_item.status in ("in_progress", "incomplete")
+
+    if isinstance(last_item, dict):
+        # Only messages support partial completion.
+        if last_item.get("type", "message") not in ("message", "reasoning"):
+            return False
+        return last_item.get("status") in ("in_progress", "incomplete")
+
+    return False
+
+
 class ResponsesRequest(OpenAIBaseModel):
     # Ordered by official OpenAI API documentation
     # https://platform.openai.com/docs/api-reference/responses/create
@@ -313,12 +339,7 @@ class ResponsesRequest(OpenAIBaseModel):
         default_template: str | None,
         default_template_content_format: ChatTemplateContentFormatOption,
     ) -> ChatParams:
-        from .utils import should_continue_final_message
-
-        # Check if we should continue the final message (partial completion)
-        # This enables Anthropic-style partial message completion where the
-        # user provides an incomplete assistant message to continue from.
-        continue_final = should_continue_final_message(self.input)
+        continue_final = _should_continue_final_message(self.input)
 
         reasoning = self.reasoning
         reasoning_effort = None if reasoning is None else reasoning.effort
