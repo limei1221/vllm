@@ -167,8 +167,9 @@ class OpenAIServingCompletion(GenerateBaseServing):
 
             sampling_params: SamplingParams | BeamSearchParams
             if request.use_beam_search:
-                sampling_params = request.to_beam_search_params(
-                    max_tokens, self.default_sampling_params
+                raise VLLMValidationError(
+                    "Beam search is not supported by this build.",
+                    parameter="use_beam_search",
                 )
             else:
                 sampling_params = request.to_sampling_params(
@@ -191,24 +192,15 @@ class OpenAIServingCompletion(GenerateBaseServing):
             )
             session_id = self._get_session_id(request, raw_request)
 
-            if isinstance(sampling_params, BeamSearchParams):
-                generator = self.beam_search(
-                    prompt=engine_input,
-                    request_id=request_id,
-                    params=sampling_params,
-                    trace_headers=trace_headers,
-                    session_id=session_id,
-                )
-            else:
-                generator = self.engine_client.generate(
-                    engine_input,
-                    sampling_params,
-                    request_id_item,
-                    trace_headers=trace_headers,
-                    priority=self._get_priority(request, raw_request),
-                    data_parallel_rank=data_parallel_rank,
-                    session_id=session_id,
-                )
+            generator = self.engine_client.generate(
+                engine_input,
+                sampling_params,
+                request_id_item,
+                trace_headers=trace_headers,
+                priority=self._get_priority(request, raw_request),
+                data_parallel_rank=data_parallel_rank,
+                session_id=session_id,
+            )
 
             generators.append(generator)
 

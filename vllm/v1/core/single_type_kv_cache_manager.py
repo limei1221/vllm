@@ -1818,7 +1818,7 @@ class CrossAttentionManager(SingleTypeKVCacheManager):
         # 1. Encoder states are unique per request (different audio/image
         #    inputs)
         # 2. Encoder states are computed once per request, not incrementally
-        # 3. No reusable prefix exists between different multimodal inputs
+        # 3. No reusable prefix exists between different encoder inputs
         # Return empty blocks to indicate no cache hits
         raise NotImplementedError("CrossAttentionManager does not support caching")
 

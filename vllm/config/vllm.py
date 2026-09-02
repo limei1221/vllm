@@ -796,7 +796,7 @@ class VllmConfig:
         #   self.language_model = SomeLanguageModel(SomeVLTextConfig)
         #   self.vision_model = SomeVisionModel(SomeVLVisionConfig)
         #
-        # SomeVLModelForMultimodalLM:
+        # SomeModelForCausalLM:
         #   self.model = SomeVLModel(SomeVLConfig)
         #   self.lm_head = nn.Linear()
         #

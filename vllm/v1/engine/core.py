@@ -948,7 +948,7 @@ class EngineCoreProc(EngineCore):
         self.tensor_ipc_receiver: TensorIpcReceiver | None = None
         if tensor_queue is not None:
             self.tensor_ipc_receiver = TensorIpcReceiver(tensor_queue)
-            logger.info("Using tensor IPC queue for multimodal tensor sharing")
+            logger.info("Using tensor IPC queue for tensor sharing")
 
         with self._perform_handshakes(
             handshake_address,

@@ -46,7 +46,7 @@ class TensorIpcSender(OOBTensorConsumer):
     """Send-side logic for tensor IPC via torch.multiprocessing.Queue.
 
     Uses a single queue targeting rank 0 (the only rank that consumes
-    multimodal tensors during TP>1 / PP>1. Note: DP>1 not supported).
+    tensors during TP>1 / PP>1. Note: DP>1 not supported).
     """
 
     def __init__(self, queue: TensorIpcQueue):

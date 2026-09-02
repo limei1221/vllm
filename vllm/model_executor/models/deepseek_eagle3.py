@@ -23,7 +23,6 @@ from vllm.model_executor.models.deepseek_v2 import (
     DeepseekV2MLAAttention,
     DeepseekV2MLP,
 )
-from vllm.model_executor.models.utils import NestedTensors
 
 from .interfaces import LocalArgmaxMixin
 from .utils import (
@@ -312,12 +311,7 @@ class Eagle3DeepseekV2ForCausalLM(LocalArgmaxMixin, DeepseekV2ForCausalLM):
             requires_grad=False,
         )
 
-    def embed_input_ids(
-        self,
-        input_ids: torch.Tensor,
-        multimodal_embeddings: NestedTensors | None = None,
-        is_multimodal: torch.Tensor | None = None,
-    ) -> torch.Tensor:
+    def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.model.embed_input_ids(input_ids)
 
     def forward(  # type: ignore[override]

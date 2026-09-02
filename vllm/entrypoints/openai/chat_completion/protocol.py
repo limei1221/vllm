@@ -432,7 +432,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
             "generation endpoints. Honored only for Fast (Rust-backed) "
             "tokenizers; otherwise `token_offsets` is null. For chat "
             "requests, offsets are relative to the templated prompt "
-            "string (after applying the chat template). Multimodal "
+            "string (after applying the chat template). Extra "
             "inputs and pre-tokenized inputs always yield null."
         ),
     )
@@ -932,7 +932,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
 
         According to OpenAI API spec, system messages can only be of type
         'text'. We log a warning instead of rejecting to avoid breaking
-        users who intentionally send multimodal system messages.
+        users who intentionally send structured system messages.
         See: https://platform.openai.com/docs/api-reference/chat/create#chat_create-messages-system_message
         """
         if not isinstance(data, dict):
@@ -943,7 +943,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
             if isinstance(msg, dict) and msg.get("role") == "system":
                 content = msg.get("content")
 
-                # If content is a list (multimodal format)
+                # If content is a list (structured format)
                 if isinstance(content, list):
                     for part in content:
                         if isinstance(part, dict):

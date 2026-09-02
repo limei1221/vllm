@@ -56,7 +56,7 @@ class InputProcessor:
             renderer=renderer,
         )
 
-        # Raw-prompt preprocessing (tokenization and multimodal processing)
+        # Raw-prompt preprocessing (tokenization)
         # is blocking, so async callers should run it on the renderer's
         # thread pool to keep their event loop responsive.
         self.process_inputs_async = make_async(
@@ -328,8 +328,8 @@ class InputProcessor:
             # NOTE: tokenizer.max_token_id is the tokenizer’s vocab size while
             # self.model_config.get_vocab_size() is the model’s vocab size.
             # For Qwen3 models, the language model has extra tokens that do
-            # not exist in the tokenizer, and vice versa for multimodal
-            # placeholder tokens in some multimodal models.
+            # not exist in the tokenizer, and vice versa for special
+            # placeholder tokens in some models.
             # See https://github.com/QwenLM/Qwen3/issues/29#issuecomment-1933720399 # noqa: E501
             # and https://github.com/vllm-project/vllm/pull/22471#discussion_r2312251421 # noqa: E501
 

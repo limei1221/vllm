@@ -43,30 +43,6 @@ class PlaceholderRangeInfo(BaseModel):
     # placeholder masks that cannot be recomputed from offset+length alone.
 
 
-class MultiModalFeatures(BaseModel):
-    """Lightweight multimodal metadata produced by the render step.
-
-    Carries hashes (for cache lookup / identification) and placeholder
-    positions so the downstream `/generate` service knows *where* in
-    the token sequence each multimodal item lives.
-    """
-
-    mm_hashes: dict[str, list[str]]
-    """Per-modality item hashes, e.g. `{"image": ["abc", "def"]}`."""
-
-    mm_placeholders: dict[str, list[PlaceholderRangeInfo]]
-    """Per-modality placeholder ranges in the token sequence."""
-
-    kwargs_data: dict[str, list[str | None]] | None = None
-    """Per-modality serialized tensor data.
-
-    Each value is a list parallel to ``mm_hashes[modality]``.  A ``str``
-    entry is a base64-encoded ``MultiModalKwargsItem``; ``None`` means
-    the item should be resolved from cache.  The entire field is
-    ``None`` for metadata-only (cache-hit) responses.
-    """
-
-
 class GenerateRequest(BaseModel):
     request_id: str = Field(
         default_factory=lambda: f"{random_uuid()}",
@@ -98,21 +74,8 @@ class GenerateRequest(BaseModel):
     """Char-level (start, end) offsets per token, relative to the
     tokenized source string. Present only when the request set
     `return_token_offsets=True` and the renderer was able to compute
-    them (Fast tokenizer, text input, no multimodal data). List length
+    them (Fast tokenizer, text input). List length
     equals `token_ids` length when present. None otherwise."""
-
-    features: MultiModalFeatures | None = None
-    """Multimodal hashes and placeholder positions (populated for MM inputs)."""
-
-    content_parts: list[dict[str, Any]] | None = None
-    """Raw multimodal input; server resolves media. Mutually exclusive
-    with ``features``."""
-
-    @model_validator(mode="after")
-    def _check_mm_fields_exclusive(self) -> "GenerateRequest":
-        if self.content_parts and self.features:
-            raise ValueError("content_parts and features are mutually exclusive")
-        return self
 
     sampling_params: SamplingParams
     """The sampling parameters for the model."""

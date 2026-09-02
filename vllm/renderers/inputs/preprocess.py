@@ -116,8 +116,14 @@ that has been standardized into a dictionary.
 """
 
 
+_MM_PROMPT_KEYS = ("multi_modal_data", "mm_processor_kwargs", "multi_modal_uuids")
+
+
 def _validate_prompt_dict(prompt: Mapping[str, object]) -> None:
     """Reject malformed dict prompts before renderer tokenization."""
+    if any(key in prompt for key in _MM_PROMPT_KEYS):
+        raise TypeError("Multi-modal inputs are not supported by this build")
+
     if (
         "prompt" not in prompt
         or "prompt_token_ids" in prompt
@@ -199,13 +205,6 @@ def _parse_dec_prompt(prompt: PromptType | object) -> DecoderDictPrompt:
 
         if "prompt_embeds" in prompt:
             raise TypeError("Cannot pass embeddings prompt to encoder-decoder models")
-
-        if (
-            "multi_modal_data" in prompt
-            or "mm_processor_kwargs" in prompt
-            or "multi_modal_uuids" in prompt
-        ):
-            raise TypeError("Cannot pass multi-modal inputs to decoder prompt")
 
         if "prompt" in prompt or "prompt_token_ids" in prompt:
             return prompt  # type: ignore[return-value]

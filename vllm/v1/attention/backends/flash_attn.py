@@ -289,7 +289,7 @@ class FlashAttentionMetadata:
 
     # PrefixLM bidirectional range containing each scheduled query token.
     # Shape: (num_actual_tokens, 2) int32, absolute [start, end] bounds;
-    # (-1, -1) for query tokens outside every multimodal range.
+    # (-1, -1) for query tokens outside every media range.
     mm_prefix_query_range_tensor: torch.Tensor | None = None
 
     # Reference Sliding Window Attention (R-SWA) fields.
@@ -737,7 +737,7 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
         )
 
         # Compute mm_prefix range tensor if the batch contains
-        # multimodal tokens with bidirectional ranges.  Built for every FA
+        # media tokens with bidirectional ranges.  Built for every FA
         # group; Gemma4 nulls the field for its non-sliding layers.
         mm_ranges = common_attn_metadata.mm_req_doc_ranges
         if mm_ranges is not None and self.mm_prefix_query_ranges_np is not None:

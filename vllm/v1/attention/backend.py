@@ -375,9 +375,7 @@ class AttentionBackend(ABC):
         if not cls.supports_block_size(block_size):
             invalid_reasons.append("block_size not supported")
         if use_mm_prefix and not cls.supports_mm_prefix():
-            invalid_reasons.append(
-                "partial multimodal token full attention not supported"
-            )
+            invalid_reasons.append("partial encoder token full attention not supported")
         if use_mla != cls.is_mla():
             if use_mla:
                 invalid_reasons.append("MLA not supported")
@@ -506,7 +504,7 @@ class CommonAttentionMetadata:
     that need exact per-row context lengths on decode rows."""
 
     mm_req_doc_ranges: dict[int, list[tuple[int, int]]] | None = None
-    """PrefixLM bidirectional ranges for multimodal tokens. Maps
+    """PrefixLM bidirectional ranges for media tokens. Maps
     request index to list of (start, end) token position ranges
     where bidirectional attention should apply. None for text-only
     batches or non-PrefixLM models. A request's ranges must not overlap."""

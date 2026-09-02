@@ -234,7 +234,7 @@ class EagleDeepseekV3ForCausalLM(DeepseekV3ForCausalLM):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if inputs_embeds is not None:
             raise NotImplementedError(
-                f"{type(self).__name__} does not support multimodal inputs yet."
+                f"{type(self).__name__} does not support embedding inputs yet."
             )
         return self.model(input_ids, positions, hidden_states)
 

@@ -131,7 +131,7 @@ def get_allowed_kwarg_only_overrides(
     Given a callable which has one or more keyword only params and a dict
     mapping param names to values, drop values that can be not be kwarg
     expanded to overwrite one or more keyword-only args. This is used in a
-    few places to handle custom processor overrides for multimodal models,
+    few places to handle custom processor overrides,
     e.g., for profiling when processor options provided by the user
     may affect the number of mm tokens per instance.
 

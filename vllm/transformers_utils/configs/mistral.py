@@ -3,7 +3,7 @@
 from typing import Any
 
 from packaging.version import Version
-from transformers import PretrainedConfig, WhisperConfig
+from transformers import PretrainedConfig
 from transformers import __version__ as TRANSFORMERS_VERSION
 
 from vllm.logger import init_logger
@@ -69,22 +69,6 @@ def adapt_config_dict(
             f"{','.join(llama_4_scaling_config_keys)}"
         )
 
-    is_vision = (config_dict.get("multimodal") or {}).get(
-        "vision_encoder_args"
-    ) or config_dict.get("vision_encoder")
-    is_audio = bool(
-        ((config_dict.get("multimodal") or {}).get("whisper_model_args") or {}).get(
-            "encoder_args"
-        )
-    )
-
-    assert not (is_vision and is_audio), "Vision and audio are mutually exclusive"
-
-    if is_vision:
-        config_dict = _remap_mistral_vision_args(config_dict)
-    if is_audio:
-        config_dict = _remap_mistral_audio_args(config_dict)
-
     for k, v in defaults.items():
         config_dict.setdefault(k, v)
 
@@ -92,24 +76,6 @@ def adapt_config_dict(
 
     logger.debug("Initialized config %s", config)
 
-    return config
-
-
-def _remap_mistral_vision_args(config: dict) -> dict:
-    if config.get("multimodal"):
-        vision_config = config.pop("multimodal")
-    else:
-        vision_config = config.pop("vision_encoder")
-
-    quant_config = config.get("quantization_config")
-    config = {
-        "model_type": "pixtral",
-        "architectures": ["PixtralForConditionalGeneration"],
-        "text_config": PretrainedConfig.from_dict(config),
-        "vision_config": PretrainedConfig.from_dict(vision_config),
-    }
-    if quant_config:
-        config["quantization_config"] = quant_config
     return config
 
 
@@ -222,65 +188,6 @@ def _remap_mistral_quantization_args(config: dict) -> dict:
         else:
             raise ValueError(f"Found unknown quantization='{quantization}' in config")
 
-    return config
-
-
-def _remap_mistral_audio_args(config: dict) -> dict:
-    whisper_args = config["multimodal"].pop("whisper_model_args")
-    encoder_args = whisper_args["encoder_args"]
-    downsample_args = whisper_args["downsample_args"]
-    downsample_factor = downsample_args["downsample_factor"]
-
-    # make sure that k/v blocks can be allocated with
-    # unified k/v cache class and pool whisper k/v cache blocks
-    # with downsample_factor:1 ratio
-    if encoder_args.get("causal"):
-        block_pool_size = downsample_factor
-        config["projection_size"] = downsample_factor * encoder_args["dim"]
-    else:
-        block_pool_size = 1
-
-    architecture = (
-        "VoxtralRealtimeGeneration"
-        if encoder_args.get("causal")
-        else "VoxtralForConditionalGeneration"
-    )
-
-    quant_config = config.get("quantization_config")
-    config = {
-        "model_type": "voxtral",
-        "architectures": [architecture],
-        "text_config": PretrainedConfig.from_dict(config),
-        "audio_config": WhisperConfig(
-            num_mel_bins=encoder_args["audio_encoding_args"]["num_mel_bins"],
-            window_size=encoder_args["audio_encoding_args"]["window_size"],
-            sampling_rate=encoder_args["audio_encoding_args"]["sampling_rate"],
-            hop_length=encoder_args["audio_encoding_args"]["hop_length"],
-            downsample_factor=downsample_factor,
-            d_model=encoder_args["dim"],
-            encoder_layers=encoder_args["n_layers"],
-            encoder_ffn_dim=encoder_args["hidden_dim"],
-            encoder_attention_heads=encoder_args["n_heads"],
-            encoder_head_dim=encoder_args["head_dim"],
-            vocab_size=encoder_args["vocab_size"],
-            is_encoder_decoder=False,  # Override WhisperConfig default
-            is_causal=encoder_args.get("causal", False),
-            sliding_window=encoder_args.get("sliding_window", None),
-            block_pool_size=block_pool_size,
-            pos_embed=encoder_args.get("pos_embed", "sinusoidal"),
-            global_log_mel_max=encoder_args["audio_encoding_args"].get(
-                "global_log_mel_max"
-            ),
-            # only needed for RoPE
-            max_position_embeddings=block_pool_size * config["max_position_embeddings"],
-        ),
-    }
-    # Sometimes max_source_positions is explicitly set to None in params.json but this
-    # is not a valid value for WhisperConfig (or downstream code that uses it).
-    if (max_source_positions := encoder_args.get("max_source_positions")) is not None:
-        config["audio_config"].max_source_positions = max_source_positions
-    if quant_config:
-        config["quantization_config"] = quant_config
     return config
 
 

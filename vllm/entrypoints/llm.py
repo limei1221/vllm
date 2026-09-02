@@ -338,14 +338,14 @@ class LLM(OfflineInferenceMixin):
         self.renderer.warmup(ChatParams(chat_template=self.chat_template))
 
         # The renderer thread pool is only consumed by the async renderer
-        # path; the synchronous `LLM` entrypoint runs multimodal
+        # path; the synchronous `LLM` entrypoint runs
         # preprocessing serially. Warn so the setting is not a silent
         # no-op. See vllm-project/vllm#42901.
         if self.model_config.renderer_num_workers > 1 and self.runner_type != "pooling":
             logger.warning_once(
                 "`renderer_num_workers=%d` was set, but the offline `LLM` "
                 "entrypoint uses the synchronous renderer path and runs "
-                "multimodal preprocessing serially across prompts. The "
+                "preprocessing serially across prompts. The "
                 "renderer thread pool is only consumed by the async "
                 "renderer path used by `vllm serve` / `AsyncLLM`, so this "
                 "setting has no effect here.",

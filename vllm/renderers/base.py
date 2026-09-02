@@ -294,12 +294,7 @@ class BaseRenderer(ABC, Generic[_T]):
         prompt: "TextPrompt",
         params: "TokenizeParams",
     ) -> bool:
-        return (
-            params.return_token_offsets
-            and self._can_produce_offsets()
-            and not prompt.get("multi_modal_data")
-            and not prompt.get("multi_modal_uuids")
-        )
+        return params.return_token_offsets and self._can_produce_offsets()
 
     @staticmethod
     def _build_tokens_prompt(

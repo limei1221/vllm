@@ -185,7 +185,7 @@ class CompletionRequest(OpenAIBaseModel):
             "generation endpoints. Honored only for Fast (Rust-backed) "
             "tokenizers; otherwise `token_offsets` is null. For chat "
             "requests, offsets are relative to the templated prompt "
-            "string (after applying the chat template). Multimodal "
+            "string (after applying the chat template). Extra "
             "inputs and pre-tokenized inputs always yield null."
         ),
     )

@@ -63,8 +63,6 @@ class _ModelInfo:
     architecture: str
     is_text_generation_model: bool = True
     is_pooling_model: bool = False
-    supports_multimodal: bool = False
-    supports_multimodal_raw_input_only: bool = False
     supports_pp: bool = True
     has_inner_state: bool = False
     is_attention_free: bool = False
@@ -75,7 +73,6 @@ class _ModelInfo:
     supports_transcription: bool = False
     supports_transcription_only: bool = False
     requires_raw_input_tokens: bool = False
-    supports_multimodal_encoder_tp_data: bool = False
 
 
 @dataclass
@@ -170,20 +167,6 @@ class _ModelRegistry:
         return True
 
     def is_pooling_model(
-        self,
-        architectures: str | list[str],
-        model_config: ModelConfig | None = None,
-    ) -> bool:
-        return False
-
-    def is_multimodal_model(
-        self,
-        architectures: str | list[str],
-        model_config: ModelConfig | None = None,
-    ) -> bool:
-        return False
-
-    def is_multimodal_raw_input_only_model(
         self,
         architectures: str | list[str],
         model_config: ModelConfig | None = None,

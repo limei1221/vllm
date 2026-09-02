@@ -66,7 +66,7 @@ class ObservabilityConfig:
     """Enable Model FLOPs Utilization (MFU) metrics."""
 
     enable_mm_processor_stats: bool = False
-    """Enable collection of timing statistics for multimodal processor operations.
+    """Enable collection of timing statistics for processor operations.
     This is for internal use only (e.g., benchmarks) and is not exposed as a CLI
     argument."""
 

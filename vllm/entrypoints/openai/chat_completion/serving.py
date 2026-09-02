@@ -6,7 +6,7 @@ import time
 from collections.abc import AsyncGenerator, AsyncIterator
 from collections.abc import Sequence as GenericSequence
 from http import HTTPStatus
-from typing import Any, Final, cast
+from typing import Any, Final
 
 from fastapi import Request
 
@@ -52,7 +52,8 @@ from vllm.entrypoints.serve.utils.request_logger import RequestLogger
 from vllm.entrypoints.serve.utils.tool_calls_utils import (
     maybe_filter_parallel_tool_calls,
 )
-from vllm.inputs import EngineInput, MultiModalPlaceholders
+from vllm.exceptions import VLLMValidationError
+from vllm.inputs import EngineInput
 from vllm.logger import init_logger
 from vllm.logprobs import Logprob
 from vllm.outputs import RequestOutput
@@ -67,42 +68,19 @@ from vllm.utils.serial_utils import numpy2base64
 logger = init_logger(__name__)
 
 
-def _get_mm_token_counts(engine_input: EngineInput) -> dict[str, int]:
-    """Sum per-modality placeholder tokens from ``mm_placeholders``.
-
-    Keyed by modality name; ``PlaceholderRange.length`` is the placeholder's
-    prompt token span, so each sum matches the placeholder tokens already
-    counted in ``usage.prompt_tokens``.
-    """
-    mm_placeholders = cast(
-        MultiModalPlaceholders | None, engine_input.get("mm_placeholders")
-    )
-    return {
-        modality: sum(p.length for p in ranges)
-        for modality, ranges in (mm_placeholders or {}).items()
-        if ranges
-    }
-
-
 def _make_prompt_tokens_details(
     enable_prompt_tokens_details: bool,
     num_cached_tokens: int | None,
     num_cache_creation_tokens: int | None,
-    mm_token_counts: dict[str, int] | None,
 ) -> PromptTokenUsageInfo | None:
-    """Build ``prompt_tokens_details`` from cached + multimodal token counts."""
+    """Build ``prompt_tokens_details`` from cached token counts."""
     if not enable_prompt_tokens_details:
         return None
-    if (
-        num_cached_tokens is None
-        and num_cache_creation_tokens is None
-        and not mm_token_counts
-    ):
+    if num_cached_tokens is None and num_cache_creation_tokens is None:
         return None
     return PromptTokenUsageInfo(
         cached_tokens=num_cached_tokens,
         created_cache_tokens=num_cache_creation_tokens,
-        multimodal_tokens=mm_token_counts or None,
     )
 
 
@@ -277,10 +255,8 @@ class OpenAIServingChat(GenerateBaseServing):
         # Schedule the request and get the result generator.
         max_model_len = self.model_config.max_model_len
         generators: list[AsyncGenerator[RequestOutput, None]] = []
-        mm_token_counts: dict[str, int] | None = None
         for i, engine_input in enumerate(engine_inputs):
             prompt_token_ids = self._extract_prompt_components(engine_input).token_ids
-            mm_token_counts = _get_mm_token_counts(engine_input)
 
             # If we are creating sub requests for multiple prompts, ensure that they
             # have unique request ids.
@@ -301,8 +277,9 @@ class OpenAIServingChat(GenerateBaseServing):
 
             sampling_params: SamplingParams | BeamSearchParams
             if request.use_beam_search:
-                sampling_params = request.to_beam_search_params(
-                    max_tokens, self.default_sampling_params
+                raise VLLMValidationError(
+                    "Beam search is not supported by this build.",
+                    parameter="use_beam_search",
                 )
             else:
                 sampling_params = request.to_sampling_params(
@@ -323,42 +300,33 @@ class OpenAIServingChat(GenerateBaseServing):
             )
             session_id = self._get_session_id(request, raw_request)
 
-            if isinstance(sampling_params, BeamSearchParams):
-                generator = self.beam_search(
-                    prompt=engine_input,
-                    request_id=sub_request_id,
-                    params=sampling_params,
-                    trace_headers=trace_headers,
-                    session_id=session_id,
-                )
+            if not request.include_reasoning:
+                reasoning_ended = True
+            elif request._grammar_from_parser:
+                # The Mistral grammar already includes an optional
+                # `think?` rule that handles both reasoning and
+                # non-reasoning outputs.
+                reasoning_ended = True
+            elif parser is not None and parser.reasoning_parser is not None:
+                reasoning_ended = parser.is_reasoning_end(prompt_token_ids or [])
             else:
-                if not request.include_reasoning:
-                    reasoning_ended = True
-                elif request._grammar_from_parser:
-                    # The Mistral grammar already includes an optional
-                    # `think?` rule that handles both reasoning and
-                    # non-reasoning outputs.
-                    reasoning_ended = True
-                elif parser is not None and parser.reasoning_parser is not None:
-                    reasoning_ended = parser.is_reasoning_end(prompt_token_ids or [])
-                else:
-                    reasoning_ended = None
+                reasoning_ended = None
 
-                generator = self.engine_client.generate(
-                    engine_input,
-                    sampling_params,
-                    sub_request_id,
-                    trace_headers=trace_headers,
-                    priority=self._get_priority(request, raw_request),
-                    data_parallel_rank=data_parallel_rank,
-                    session_id=session_id,
-                    reasoning_ended=reasoning_ended,
-                    reasoning_parser_kwargs={
-                        "chat_template_kwargs": chat_template_kwargs,
-                    }
-                    if parser is not None and parser.reasoning_parser is not None
-                    else None,
-                )
+            generator = self.engine_client.generate(
+                engine_input,
+                sampling_params,
+                sub_request_id,
+                trace_headers=trace_headers,
+                priority=self._get_priority(request, raw_request),
+                data_parallel_rank=data_parallel_rank,
+                session_id=session_id,
+                reasoning_ended=reasoning_ended,
+                reasoning_parser_kwargs={
+                    "chat_template_kwargs": chat_template_kwargs,
+                }
+                if parser is not None and parser.reasoning_parser is not None
+                else None,
+            )
 
             generators.append(generator)
 
@@ -375,7 +343,6 @@ class OpenAIServingChat(GenerateBaseServing):
                 tokenizer,
                 request_metadata,
                 chat_template_kwargs=chat_template_kwargs,
-                mm_token_counts=mm_token_counts,
             )
 
         return await self.chat_completion_full_generator(
@@ -387,7 +354,6 @@ class OpenAIServingChat(GenerateBaseServing):
             tokenizer,
             request_metadata,
             parser=parser,
-            mm_token_counts=mm_token_counts,
         )
 
     def get_chat_request_role(self, request: ChatCompletionRequest) -> str:
@@ -433,7 +399,6 @@ class OpenAIServingChat(GenerateBaseServing):
         tokenizer: TokenizerLike,
         request_metadata: RequestResponseMetadata,
         chat_template_kwargs: dict[str, Any] | None = None,
-        mm_token_counts: dict[str, int] | None = None,
     ) -> AsyncGenerator[str, None]:
         created_time = int(time.time())
         chunk_object_type: Final = "chat.completion.chunk"
@@ -807,7 +772,6 @@ class OpenAIServingChat(GenerateBaseServing):
                     self.enable_prompt_tokens_details,
                     num_cached_tokens,
                     num_cache_creation_tokens,
-                    mm_token_counts,
                 )
 
                 # In streaming, metrics ride on this final usage chunk, which is
@@ -890,7 +854,6 @@ class OpenAIServingChat(GenerateBaseServing):
         tokenizer: TokenizerLike,
         request_metadata: RequestResponseMetadata,
         parser: Parser | None = None,
-        mm_token_counts: dict[str, int] | None = None,
     ) -> ErrorResponse | ChatCompletionResponse:
         created_time = int(time.time())
         final_res: RequestOutput | None = None
@@ -1108,7 +1071,6 @@ class OpenAIServingChat(GenerateBaseServing):
             self.enable_prompt_tokens_details,
             final_res.num_cached_tokens,
             final_res.num_cache_creation_tokens,
-            mm_token_counts,
         )
 
         request_metadata.final_usage_info = usage

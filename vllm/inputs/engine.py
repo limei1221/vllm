@@ -2,8 +2,7 @@
 
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Literal, TypeAlias
+from typing import TYPE_CHECKING, Literal, TypeAlias
 
 from typing_extensions import NotRequired, TypedDict, assert_never
 
@@ -11,9 +10,6 @@ from vllm.exceptions import VLLMValidationError
 
 if TYPE_CHECKING:
     import torch
-
-    MultiModalKwargsOptionalItems: TypeAlias = Any
-    PlaceholderRange: TypeAlias = Any
 
 
 class _InputOptions(TypedDict):
@@ -123,130 +119,21 @@ def embeds_input(
     return inputs
 
 
-MultiModalHashes: TypeAlias = Mapping[str, list[str]]
-"""
-A dictionary containing per-item hashes for each modality.
-"""
-
-
-MultiModalPlaceholders: TypeAlias = Mapping[str, Sequence["PlaceholderRange"]]
-"""
-A dictionary containing per-item placeholder ranges for each modality.
-"""
-
-
-class MultiModalInput(_InputOptions):
-    """Represents multi-modal input to the engine."""
-
-    type: Literal["multimodal"]
-    """The type of input."""
-
-    prompt_token_ids: list[int]
-    """The processed token IDs which includes placeholder tokens."""
-
-    prompt: NotRequired[str]
-    """The prompt text corresponding to the token IDs, if available."""
-
-    mm_kwargs: "MultiModalKwargsOptionalItems"
-    """Keyword arguments to be directly passed to the model after batching."""
-
-    mm_hashes: MultiModalHashes
-    """The hashes of the multi-modal data."""
-
-    mm_placeholders: MultiModalPlaceholders
-    """
-    For each modality, information about the placeholder tokens in
-    `prompt_token_ids`.
-    """
-
-    assistant_tokens_mask: NotRequired[list[int] | None]
-    """Per-token 0/1 mask marking assistant-generated tokens.
-    Populated when ``return_assistant_tokens_mask=True`` is set on the
-    render request and the chat template supports ``{% generation %}``."""
-
-
-def mm_input(
-    prompt_token_ids: list[int],
-    mm_kwargs: "MultiModalKwargsOptionalItems",
-    mm_hashes: MultiModalHashes,
-    mm_placeholders: MultiModalPlaceholders,
-    *,
-    prompt: str | None = None,
-    cache_salt: str | None = None,
-) -> MultiModalInput:
-    inputs = MultiModalInput(
-        type="multimodal",
-        prompt_token_ids=prompt_token_ids,
-        mm_kwargs=mm_kwargs,
-        mm_hashes=mm_hashes,
-        mm_placeholders=mm_placeholders,
-    )
-
-    if prompt is not None:
-        inputs["prompt"] = prompt
-    if cache_salt is not None:
-        inputs["cache_salt"] = cache_salt
-
-    return inputs
-
-
-class MultiModalEncDecInput(MultiModalInput):
-    """
-    Represents multi-modal input to the engine for encoder-decoder models.
-
-    Note:
-        Even text-only encoder-decoder models are currently implemented
-        as multi-modal models for convenience.
-        (Example: https://github.com/vllm-project/bart-plugin)
-    """
-
-    encoder_prompt_token_ids: list[int]
-    """The processed token IDs of the encoder prompt."""
-
-    encoder_prompt: NotRequired[str]
-    """The prompt text corresponding to the encoder token IDs, if available."""
-
-
-def mm_enc_dec_input(
-    encoder_inputs: MultiModalInput,
-    decoder_prompt_token_ids: list[int],
-    *,
-    decoder_prompt: str | None = None,
-) -> MultiModalEncDecInput:
-    inputs = MultiModalEncDecInput(
-        type="multimodal",
-        prompt_token_ids=decoder_prompt_token_ids,
-        encoder_prompt_token_ids=encoder_inputs["prompt_token_ids"],
-        mm_kwargs=encoder_inputs["mm_kwargs"],
-        mm_hashes=encoder_inputs["mm_hashes"],
-        mm_placeholders=encoder_inputs["mm_placeholders"],
-    )
-
-    if decoder_prompt is not None:
-        inputs["prompt"] = decoder_prompt
-    if "prompt" in encoder_inputs:
-        inputs["encoder_prompt"] = encoder_inputs["prompt"]
-    if "cache_salt" in encoder_inputs:
-        inputs["cache_salt"] = encoder_inputs["cache_salt"]
-
-    return inputs
-
-
-DecoderOnlyEngineInput: TypeAlias = TokensInput | EmbedsInput | MultiModalInput
+DecoderOnlyEngineInput: TypeAlias = TokensInput | EmbedsInput
 """
 A rendered [`DecoderOnlyPrompt`][vllm.inputs.llm.DecoderOnlyPrompt]
 which can be passed to `LLMEngine.add_request` or `AsyncLLM.add_request`.
 """
 
 
-EncoderInput: TypeAlias = TokensInput | MultiModalEncDecInput
+EncoderInput: TypeAlias = TokensInput
 """
 A rendered [`EncoderPrompt`][vllm.inputs.llm.EncoderPrompt]
 which can be passed to `LLMEngine.add_request` or `AsyncLLM.add_request`.
 """
 
 
-DecoderEngineInput: TypeAlias = TokensInput | MultiModalInput
+DecoderEngineInput: TypeAlias = TokensInput
 """
 A rendered [`DecoderPrompt`][vllm.inputs.llm.DecoderPrompt]
 which can be passed to `LLMEngine.add_request` or `AsyncLLM.add_request`.
@@ -271,7 +158,7 @@ class EncoderDecoderInput(TypedDict):
     """The time when the input was received (before rendering)."""
 
 
-SingletonInput: TypeAlias = DecoderOnlyEngineInput | MultiModalEncDecInput
+SingletonInput: TypeAlias = DecoderOnlyEngineInput
 """
 A rendered [`SingletonPrompt`][vllm.inputs.llm.SingletonPrompt]
 which can be passed to `LLMEngine.add_request` or `AsyncLLM.add_request`.
@@ -289,15 +176,6 @@ def _validate_enc_input(enc_input: SingletonInput) -> EncoderInput:
     if enc_input["type"] == "embeds":
         raise VLLMValidationError(
             "Embedding inputs are not supported for encoder-decoder models"
-        )
-
-    if (
-        enc_input["type"] == "multimodal"
-        and "encoder_prompt_token_ids" not in enc_input
-    ):
-        raise RuntimeError(
-            "You should register an encoder-decoder multi-modal processor "
-            "for encoder-decoder models."
         )
 
     return enc_input  # type: ignore[return-value]
@@ -345,19 +223,7 @@ def build_enc_dec_input(
     enc_input_new: EncoderInput
     dec_input_new: DecoderEngineInput
 
-    if enc_input["type"] == "multimodal":
-        enc_input_new = tokens_input(
-            enc_input["encoder_prompt_token_ids"],
-            prompt=enc_input.get("encoder_prompt"),
-        )
-        dec_input_new = mm_input(
-            prompt_token_ids=dec_input["prompt_token_ids"],
-            prompt=dec_input.get("prompt"),
-            mm_kwargs=enc_input["mm_kwargs"],
-            mm_hashes=enc_input["mm_hashes"],
-            mm_placeholders=enc_input["mm_placeholders"],
-        )
-    elif enc_input["type"] == "token":
+    if enc_input["type"] == "token":
         enc_input_new = tokens_input(prompt_token_ids=[])
         dec_input_new = dec_input
     else:

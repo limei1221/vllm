@@ -184,10 +184,10 @@ def support_torch_compile(
     enforce that dynamo does not specialize on 0/1 values in the case of dummy input
     such as for vision model compilation
 
-    `is_encoder` marks this module as a portion of an multimodal encoder.
+    `is_encoder` marks this module as a portion of an encoder.
     When True, the compile range upper bound is set to MAX_INT32 instead of
     max_num_batched_tokens, since encoder input shapes are unpredictable.
-    This is typically used for vision encoder sub-modules in multimodal models.
+    This is typically used for encoder sub-modules.
 
     `shape_invariants` is a function that gets compiled right before forward.
     The function should have the torch._check calls that are needed to set
@@ -360,7 +360,7 @@ def _support_torch_compile(
         if vllm_config is None:
             vllm_config = get_current_vllm_config()
 
-        # NOTE: to support multimodal models (such as encoder),
+        # NOTE: to support encoder modules,
         # we may not have vllm_config so we may need to patch it
         sig = inspect.signature(old_init)
         # Check that any positional arguments match the old_init method signature

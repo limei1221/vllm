@@ -79,22 +79,19 @@ class SchedulerConfig:
     In real usage, this should be set in `EngineArgs.create_engine_config`.
     """
 
-    is_multimodal_model: bool = False
-    """True if the model is multimodal."""
-
     # TODO (ywang96): Make this configurable.
     max_num_encoder_input_tokens: int = Field(init=False)
-    """Multimodal encoder compute budget, only used in V1.
+    """Encoder compute budget, only used in V1.
 
     NOTE: This is not currently configurable. It will be overridden by
-    max_num_batched_tokens in case max multimodal embedding size is larger."""
+    max_num_batched_tokens in case max embedding size is larger."""
 
     # TODO (ywang96): Make this configurable.
     encoder_cache_size: int = Field(init=False)
-    """Multimodal encoder cache size, only used in V1.
+    """Encoder cache size, only used in V1.
 
     NOTE: This is not currently configurable. It will be overridden by
-    max_num_batched_tokens in case max multimodal embedding size is larger."""
+    max_num_batched_tokens in case max embedding size is larger."""
 
     policy: SchedulerPolicy = "fcfs"
     """The scheduling policy to use:
@@ -106,7 +103,7 @@ class SchedulerConfig:
 
     disable_chunked_mm_input: bool = False
     """If set to true and chunked prefill is enabled, we do not want to
-    partially schedule a multimodal item. Only used in V1
+    partially schedule an encoder item. Only used in V1
     This ensures that if a request has a mixed prompt
     (like text tokens TTTT followed by image tokens IIIIIIIIII) where only
     some image tokens can be scheduled (like TTTTIIIII, leaving IIIII),

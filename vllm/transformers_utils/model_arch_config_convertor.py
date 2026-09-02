@@ -353,30 +353,9 @@ class ModelArchConfigConvertorBase:
             )
         return False
 
-    def is_mm_prefix_lm(self, supports_multimodal: bool = True) -> bool:
-        """Whether to use bidirectional attention for mm positions.
-
-        ``supports_multimodal`` is False when the deployment is configuration-
-        disabled for multimodal inputs (text-only serving). In that case
-        mm_prefix is unnecessary and must stay off so attention backends
-        without ``supports_mm_prefix()`` remain eligible.
-        """
-        if not supports_multimodal:
-            return False
-        if hasattr(self.hf_config, "is_mm_prefix_lm"):
-            return bool(self.hf_config.is_mm_prefix_lm)
-        # fallback to list of known models
-        MM_PREFIX_LM_MODELS = (
-            "bagel",
-            "gemma3",
-            "molmo2",
-            "moondream3",
-            "paligemma",
-            "umm",
-        )
-        if not hasattr(self.hf_config, "model_type"):
-            return False
-        return self.hf_config.model_type in MM_PREFIX_LM_MODELS
+    def is_mm_prefix_lm(self) -> bool:
+        """Bidirectional prefix attention is not part of this build."""
+        return False
 
     def rswa_window(self) -> int | None:
         value = getattr(self.hf_config, "rswa_window", None)
@@ -419,9 +398,9 @@ class ModelArchConfigConvertorBase:
             derived_max_model_len = tmp_max_len
         return derived_max_model_len, max_len_key
 
-    def convert(self, supports_multimodal: bool = True) -> ModelArchitectureConfig:
+    def convert(self) -> ModelArchitectureConfig:
         if (per_layer := self.get_per_layer_hf_configs()) is None:
-            return self.convert_layer(supports_multimodal)
+            return self.convert_layer()
 
         if self.is_deepseek_mla():
             raise NotImplementedError(
@@ -433,15 +412,10 @@ class ModelArchConfigConvertorBase:
         # Reading a varying attribute off the global config would raise, so the
         # whole-model config has to be built up from the layers.
         return ModelArchitectureConfig.from_layers(
-            [
-                type(self)(*configs).convert_layer(supports_multimodal)
-                for configs in per_layer
-            ]
+            [type(self)(*configs).convert_layer() for configs in per_layer]
         )
 
-    def convert_layer(
-        self, supports_multimodal: bool = True
-    ) -> ModelArchitectureConfig:
+    def convert_layer(self) -> ModelArchitectureConfig:
         """Convert one homogeneous config, without resolving per-layer values.
 
         `convert` calls this once per layer, so it must not recurse back into
@@ -463,7 +437,7 @@ class ModelArchConfigConvertorBase:
             num_experts_per_token=self.get_num_experts_per_token(),
             quantization_config=self.get_quantization_config(),
             is_deepseek_mla=self.is_deepseek_mla(),
-            is_mm_prefix_lm=self.is_mm_prefix_lm(supports_multimodal),
+            is_mm_prefix_lm=self.is_mm_prefix_lm(),
             rswa_window=self.rswa_window(),
             derived_max_model_len_and_key=self.derive_max_model_len_and_key(),
         )
@@ -471,59 +445,9 @@ class ModelArchConfigConvertorBase:
         return model_arch_config
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 class DeepSeekMTPModelArchConfigConvertor(ModelArchConfigConvertorBase):
     def get_num_hidden_layers(self) -> int:
         return getattr(self.hf_text_config, "num_nextn_predict_layers", 0)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 # hf_config.model_type -> convertor class

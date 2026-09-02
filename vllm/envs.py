@@ -763,7 +763,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "VLLM_ASSETS_CACHE_MODEL_CLEAN": lambda: bool(
         int(os.getenv("VLLM_ASSETS_CACHE_MODEL_CLEAN", "0"))
     ),
-    # Timeout for fetching images when serving multimodal models
+    # Timeout for fetching remote media
     # Default is 5 seconds
     "VLLM_IMAGE_FETCH_TIMEOUT": lambda: int(os.getenv("VLLM_IMAGE_FETCH_TIMEOUT", "5")),
     # Maximum number of retries for fetching media (images, audio, video)

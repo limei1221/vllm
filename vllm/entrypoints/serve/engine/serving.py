@@ -108,7 +108,7 @@ class BaseServing:
 
     def _get_message_types(self, request: AnyRequest) -> set[str]:
         """Retrieve the set of types from message content dicts up
-        until `_`; we use this to match potential multimodal data
+        until `_`; we use this to match potential extra data
         with default per modality loras.
         """
         message_types: set[str] = set()

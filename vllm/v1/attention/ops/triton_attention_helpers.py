@@ -293,7 +293,7 @@ def compute_kv_seq_mask(
     Causal (key <= query) by default; AND-ed with either chunked
     attention (``CHUNK_LOOKBACK >= 0``) or sliding window
     (``SLIDING_WINDOW > 0``); OR-ed with the bidirectional ranges from
-    ``mm_prefix_range`` when PrefixLM / multimodal attention is active.
+    ``mm_prefix_range`` when PrefixLM attention is active.
     Order matches FlexAttention: ``(causal AND window) OR mm_prefix``.
     Chunked attention takes precedence over sliding window when both
     are non-default — the launcher zeros ``CHUNK_LOOKBACK`` whenever
@@ -342,7 +342,7 @@ def compute_kv_seq_mask(
         in_window = (query_abs_pos - seq_offset) < R_SWA_WINDOW
         seq_mask = seq_mask & (in_prefix | in_window)
 
-    # PrefixLM: extend mask with bidirectional ranges for multimodal tokens.
+    # PrefixLM: extend mask with bidirectional ranges for media tokens.
     # Default (MM_PREFIX_CLAMP_SW=False): applied AFTER sliding window so
     # mm_prefix ranges override the SW restriction -> (causal AND SW) OR mm.
     # Gemma4 (MM_PREFIX_CLAMP_SW=True): the bidirectional image block must stay

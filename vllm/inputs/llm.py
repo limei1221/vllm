@@ -2,95 +2,18 @@
 
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar, final
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 from typing_extensions import NotRequired, TypedDict
 
 if TYPE_CHECKING:
     import torch
 
-    AudioItem: TypeAlias = Any
-    ImageItem: TypeAlias = Any
-    VideoItem: TypeAlias = Any
-    VisionChunk: TypeAlias = Any
-
-
-_T = TypeVar("_T")
-
-ModalityData: TypeAlias = _T | list[_T | None] | None
-"""
-Either a single data item, or a list of data items. Can only be None if UUID
-is provided.
-
-The number of data items allowed per modality is restricted by
-`--limit-mm-per-prompt`.
-"""
-
-
-@final
-class MultiModalDataBuiltins(TypedDict, total=False):
-    """Type annotations for modality types predefined by vLLM."""
-
-    image: ModalityData["ImageItem"]
-    """The input image(s)."""
-
-    video: ModalityData["VideoItem"]
-    """The input video(s)."""
-
-    audio: ModalityData["AudioItem"]
-    """The input audio(s)."""
-
-    vision_chunk: ModalityData["VisionChunk"]
-    """The input visual atom(s) - unified modality for images and video chunks."""
-
-
-MultiModalDataDict: TypeAlias = Mapping[str, ModalityData[Any]]
-"""
-A dictionary containing an entry for each modality type to input.
-
-The built-in modalities are defined by
-[`MultiModalDataBuiltins`][vllm.inputs.llm.MultiModalDataBuiltins].
-"""
-
-MultiModalUUIDDict: TypeAlias = Mapping[str, Sequence[str | None] | str]
-"""
-A dictionary containing user-provided UUIDs for items in each modality.
-If a UUID for an item is not provided, its entry will be `None` and
-MultiModalHasher will compute a hash for the item.
-
-The UUID will be used to identify the item for all caching purposes
-(input processing caching, embedding caching, prefix caching, etc).
-"""
-
 
 class _PromptOptions(TypedDict):
     """
     Additional options available to all
     [`SingletonPrompt`][vllm.inputs.llm.SingletonPrompt] types.
-    """
-
-    multi_modal_data: NotRequired[MultiModalDataDict | None]
-    """
-    Optional multi-modal data to pass to the model,
-    if the model supports it.
-    """
-
-    mm_processor_kwargs: NotRequired[dict[str, Any] | None]
-    """
-    Optional multi-modal processor kwargs to be forwarded to the
-    multimodal input mapper & processor. Note that if multiple modalities
-    have registered mappers etc for the model being considered, we attempt
-    to pass the mm_processor_kwargs to each of them.
-    """
-
-    multi_modal_uuids: NotRequired[MultiModalUUIDDict]
-    """
-    Optional user-specified UUIDs for multimodal items, mapped by modality.
-    Lists must match the number of items per modality and may contain `None`.
-    For `None` entries, the hasher will compute IDs automatically; non-None
-    entries override the default hashes for caching, and MUST be unique per
-    multimodal item.
     """
 
     cache_salt: NotRequired[str]
@@ -121,7 +44,7 @@ class TokensPrompt(_PromptOptions):
     prompt_token_offsets: NotRequired[list[tuple[int, int]] | None]
     """Char-level (start, end) offsets per token, relative to the
     tokenized source string. Present only when offsets were requested
-    AND a Fast (Rust-backed) tokenizer was used AND no multimodal data
+    AND a Fast (Rust-backed) tokenizer was used AND no extra data
     was present. The list length equals the length of `prompt_token_ids`."""
 
 

@@ -533,7 +533,7 @@ class CompilationConfig:
     If None, defaults to attention ops for piecewise cudagraphs.
     If empty list [], no ops are excluded (suitable for full cudagraphs)."""
     compile_mm_encoder: bool = False
-    """Whether or not to compile the multimodal encoder.
+    """Whether or not to compile the encoder.
     Currently, this only works for `Qwen2_5_vl` and `mLLaMa4` models on selected
     platforms. It may also work for models loaded with the Transformers modeling backend
     if the encoder is compilable. Disabled by default until more models are
@@ -541,7 +541,7 @@ class CompilationConfig:
 
     # Vision encoder CUDA graph
     cudagraph_mm_encoder: bool = False
-    """Enable CUDA graph capture for multimodal encoder (ViT).
+    """Enable CUDA graph capture for the encoder.
     When enabled, captures full encoder forward as CUDA graph
     for each token budget level."""
 
@@ -747,7 +747,7 @@ class CompilationConfig:
     compilation_time: float = field(default=0.0, init=False)
     """time taken for compilation"""
     encoder_compilation_time: float = field(default=0.0, init=False)
-    """time taken for multimodal encoder compilation"""
+    """time taken for encoder compilation"""
 
     static_forward_context: dict[str, Any] = field(default_factory=dict, init=False)
     """Per-model forward context

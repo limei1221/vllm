@@ -3,8 +3,7 @@
 
 import json
 import types
-from collections import Counter
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import lru_cache, partial
 from pathlib import Path
@@ -88,8 +87,7 @@ See `_ensure_prompt_embeds_placeholder_token` in `vllm/renderers/hf.py`.
 
 
 _REQUIRE_MM_PROCESSOR_ERROR: Final[str] = (
-    "Resolving modality {modality!r} requires a multimodal processor "
-    "but none is available."
+    "Resolving modality {modality!r} requires a media processor but none is available."
 )
 
 _ENABLE_PROMPT_EMBEDS_ERROR: Final[str] = (
@@ -395,7 +393,6 @@ ModalityStr = Literal[
     "prompt_embeds",
 ]
 _T = TypeVar("_T")
-_AsyncMultiModalItem: TypeAlias = Callable[[], Awaitable[tuple[object, str | None]]]
 
 
 # Backward compatibility for single item input
@@ -504,65 +501,6 @@ def _get_interleaved_text_prompt(
             texts[idx] = placeholder_storage[elem].pop(0)
 
     return "\n".join(texts)
-
-
-# TODO: Let user specify how to insert multimodal tokens into prompt
-# (similar to chat template)
-def _get_full_multimodal_text_prompt(
-    placeholder_storage: dict[str, list],
-    texts: list[str],
-    interleave_strings: bool,
-    multimodal_content_part_separator: str = "\n",
-) -> str:
-    """Combine multimodal prompts for a multimodal language model."""
-
-    # flatten storage to make it looks like
-    # {
-    #   "<|image|>": 2,
-    #   "<|audio|>": 1
-    # }
-    placeholder_counts = Counter(
-        [v for elem in placeholder_storage.values() for v in elem]
-    )
-
-    if interleave_strings:
-        text_prompt = _get_interleaved_text_prompt(placeholder_storage, texts)
-    else:
-        text_prompt = "\n".join(texts)
-
-    # Pass interleaved text further in case the user used image placeholders
-    # himself, but forgot to disable the 'interleave_strings' flag
-
-    # Look through the text prompt to check for missing placeholders
-    missing_placeholders: list[str] = []
-    for placeholder in placeholder_counts:
-        # For any existing placeholder in the text prompt, we leave it as is
-        placeholder_counts[placeholder] -= text_prompt.count(placeholder)
-
-        if placeholder_counts[placeholder] < 0:
-            logger.error(
-                "Placeholder count is negative! "
-                "Ensure that the 'interleave_strings' flag is disabled "
-                "(current value: %s) "
-                "when manually placing image placeholders.",
-                interleave_strings,
-            )
-            logger.debug("Input prompt: %s", text_prompt)
-            raise VLLMValidationError(
-                f"Found more '{placeholder}' placeholders in input prompt than "
-                "actual multimodal data items."
-            )
-
-        missing_placeholders.extend([placeholder] * placeholder_counts[placeholder])
-
-    # NOTE: Default behaviour: we always add missing placeholders
-    # at the front of the prompt, if interleave_strings=False
-    if text_prompt:
-        return multimodal_content_part_separator.join(
-            missing_placeholders + [text_prompt]
-        )
-    else:
-        return multimodal_content_part_separator.join(missing_placeholders)
 
 
 # No need to validate using Pydantic again
@@ -727,12 +665,12 @@ def _parse_chat_message_content_mm_part(
             return "tool_reference", tool_reference
         # Raise an error if no 'type' or direct URL is found.
         raise VLLMValidationError(
-            "Missing 'type' field in multimodal part.", parameter="type"
+            "Missing 'type' field in content part.", parameter="type"
         )
 
     if not isinstance(part_type, str):
         raise VLLMValidationError(
-            "Invalid 'type' field in multimodal part.", parameter="type"
+            "Invalid 'type' field in content part.", parameter="type"
         )
     return part_type, "unknown part_type content"
 

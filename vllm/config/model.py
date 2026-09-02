@@ -347,11 +347,11 @@ class ModelConfig:
     """Number of worker threads in the renderer thread pool. The pool is
     consumed by the async renderer path (e.g. the OpenAI-compatible API
     server started by `vllm serve`) to parallelize tokenization, chat
-    template rendering, and multimodal preprocessing across concurrent
+    template rendering, and prompt preprocessing across concurrent
     requests.
 
     The offline `LLM` entrypoint uses the synchronous renderer path and
-    processes prompts (including multimodal preprocessing) serially, so
+    processes prompts serially, so
     this setting has no effect there."""
 
     # Pooler config
@@ -361,9 +361,6 @@ class ModelConfig:
 
     # Always None in this build; kept so downstream `is not None` checks
     # short-circuit without import errors.
-    multimodal_config: Any | None = None
-    """Multimodal config. Unsupported in this build; always None."""
-
     def compute_hash(self) -> str:
         """
         WARNING: Whenever a new field is added to this config,
@@ -546,7 +543,7 @@ class ModelConfig:
             self.hf_text_config, "attention_chunk_size", None
         )
         self.encoder_config = self._get_encoder_config()
-        # Image-processor metadata is only consumed by multimodal models.
+        # Image-processor metadata is unused in this build.
         # Probing it for text-only models causes avoidable Hub requests.
         self.hf_image_processor_config: dict[str, Any] = {}
 
@@ -689,7 +686,7 @@ class ModelConfig:
             self.hf_text_config,
             revision=getattr(self, "revision", None),
         )
-        return convertor.convert(supports_multimodal=False)
+        return convertor.convert()
 
     @field_validator("tokenizer", "max_model_len", mode="wrap")
     @classmethod
@@ -731,8 +728,7 @@ class ModelConfig:
         """Determine which Transformers modeling backend class will be used if
         `model_impl` is set to `transformers` or `auto`."""
         cls = "Transformers"
-        # If 'hf_config is not hf_text_config' it's a nested config, i.e. multimodal
-        cls += "MultiModal" if self.hf_config is not self.hf_text_config else ""
+        # If 'hf_config is not hf_text_config' it's a nested config
         cls += "MoE" if self.is_moe else ""
         # Check if the architecture we're wrapping has defaults
         runner = None
@@ -1173,16 +1169,6 @@ class ModelConfig:
         # CoreEngine the scheduler will assign work to. TP>1 is
         # also not supported because this requires broadcasting
         # MM tensors between all TP ranks.
-        if (
-            self.multimodal_config is not None
-            and self.multimodal_config.mm_tensor_ipc == "torch_shm"
-            and parallel_config.world_size_across_dp > 1
-        ):
-            raise ValueError(
-                "mm_tensor_ipc='torch_shm' is not supported with "
-                "data_parallel_size > 1 or tensor_parallel_size > 1 "
-                "or pipeline_parallel_size > 1."
-            )
 
     def get_sliding_window(self) -> int | None:
         """Get the sliding window size from the HF text config if present."""
@@ -1533,14 +1519,6 @@ class ModelConfig:
     @property
     def uses_xdrope_dim(self) -> int:
         return uses_xdrope_dim(self.hf_config)
-
-    @property
-    def is_multimodal_model(self) -> bool:
-        return False
-
-    @property
-    def is_multimodal_raw_input_only_model(self) -> bool:
-        return False
 
     @property
     def requires_raw_input_tokens(self) -> bool:

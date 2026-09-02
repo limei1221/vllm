@@ -12,8 +12,6 @@ from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.config import VerifyAndUpdateConfig
 
-from .interfaces import supports_multimodal
-
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
 
@@ -29,21 +27,11 @@ _GENERATE_SUFFIXES = [
 ]
 
 
-
-
-
-
-
-
-
-
-
-
 def _resolve_num_labels(hf_config: Any, text_config: Any) -> int:
     """Resolve the label count for a sequence classification head.
 
     ``PretrainedConfig.num_labels`` is derived from ``id2label``, which always
-    carries a default of two entries. Composite configs (such as multimodal
+    carries a default of two entries. Composite configs (such as nested
     checkpoints) declare their label space on the top-level config, so reading
     ``num_labels`` from ``get_text_config()`` silently returns that default and
     builds a score head of the wrong size.
@@ -60,8 +48,6 @@ def _resolve_num_labels(hf_config: Any, text_config: Any) -> int:
     if hf_config.num_labels != PretrainedConfig().num_labels:
         return hf_config.num_labels
     return text_config.num_labels
-
-
 
 
 class SequenceClassificationConfig(VerifyAndUpdateConfig):
@@ -100,15 +86,6 @@ def _get_language_model_for_seq_cls(model: nn.Module) -> nn.Module:
     Get the language model component for sequence classification conversion.
     For VLMs, returns the inner language model. For standard LLMs, returns model itself.
     """
-    multimodal_model: object = model
-    if supports_multimodal(multimodal_model):
-        try:
-            lm = multimodal_model.get_language_model()
-            if lm is not model:
-                return lm
-        except Exception:
-            pass
-
     for attr_name in ("language_model", "lm", "text_model"):
         if hasattr(model, attr_name):
             candidate = getattr(model, attr_name)

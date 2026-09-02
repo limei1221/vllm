@@ -591,7 +591,7 @@ def flatten_bn(
     concat: bool = False,
 ) -> list[torch.Tensor] | torch.Tensor:
     """
-    Flatten the `B` and `N` dimensions of batched multimodal inputs.
+    Flatten the `B` and `N` dimensions of batched inputs.
 
     The input tensor should have shape `(B, N, ...)`.
     """
@@ -629,53 +629,6 @@ def _embedding_count_expression(embeddings: NestedTensors) -> str:
     return " + ".join(_embedding_count_expression(inner) for inner in embeddings)
 
 
-def split_list_into_ranges(lst: torch.Tensor, interval: int) -> list[list[int]]:
-    ranges: list[list[int]] = [[] for _ in range((max(lst) // interval) + 1)]
-    for num in lst:
-        index = num // interval
-        ranges[index].append(num)
-    return ranges
-
-
-def _merge_multimodal_embeddings(
-    inputs_embeds: torch.Tensor,
-    multimodal_embeddings: NestedTensors,
-    is_multimodal: torch.Tensor,
-) -> torch.Tensor:
-    """
-    Merge `multimodal_embeddings` into `inputs_embeds` by overwriting the
-    positions in `inputs_embeds` corresponding to placeholder tokens in
-    `input_ids`.
-
-    Note:
-        This updates `inputs_embeds` in place.
-    """
-    if len(multimodal_embeddings) == 0:
-        return inputs_embeds
-
-    mm_embeds_flat = _flatten_embeddings(multimodal_embeddings)
-    input_dtype = inputs_embeds.dtype
-
-    try:
-        # If is_multimodal is on CPU this avoids a D2H sync
-        inputs_embeds[is_multimodal] = mm_embeds_flat.to(dtype=input_dtype)
-    except RuntimeError as e:
-        num_actual_tokens = len(mm_embeds_flat)
-        num_expected_tokens = is_multimodal.sum().item()
-
-        if num_actual_tokens != num_expected_tokens:
-            expr = _embedding_count_expression(multimodal_embeddings)
-
-            raise ValueError(
-                f"Attempted to assign {expr} = {num_actual_tokens} "
-                f"multimodal tokens to {num_expected_tokens} placeholders"
-            ) from e
-
-        raise ValueError("Error during index put operation") from e
-
-    return inputs_embeds
-
-
 class StageMissingLayer(nn.Module):
     def __init__(self, stage_name: str, module: nn.Module | None = None) -> None:
         super().__init__()
@@ -696,7 +649,14 @@ class StageMissingLayer(nn.Module):
         return f"stage_name={self.stage_name!r}"
 
 
-@contextmanager
+def split_list_into_ranges(lst: torch.Tensor, interval: int) -> list[list[int]]:
+    ranges: list[list[int]] = [[] for _ in range((max(lst) // interval) + 1)]
+    for num in lst:
+        index = num // interval
+        ranges[index].append(num)
+    return ranges
+
+
 def collect_children(
     module: nn.Module,
     *,

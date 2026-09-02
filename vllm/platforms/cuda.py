@@ -325,12 +325,11 @@ class CudaPlatformBase(Platform):
         if (
             model_config is not None
             and model_config.is_mm_prefix_lm
-            and scheduler_config.is_multimodal_model
             and not scheduler_config.disable_chunked_mm_input
         ):
             logger.warning_once(
                 "Forcing --disable_chunked_mm_input for models "
-                "with multimodal-bidirectional attention."
+                "with bidirectional prefix attention."
             )
             scheduler_config.disable_chunked_mm_input = True
 

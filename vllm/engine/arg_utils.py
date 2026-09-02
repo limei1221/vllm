@@ -1955,7 +1955,6 @@ class EngineArgs:
             max_model_len=model_config.max_model_len,
             enable_chunked_prefill=self.enable_chunked_prefill,
             disable_chunked_mm_input=self.disable_chunked_mm_input,
-            is_multimodal_model=model_config.is_multimodal_model,
             is_encoder_decoder=model_config.is_encoder_decoder,
             policy=self.scheduling_policy,
             scheduler_cls=self.scheduler_cls,
