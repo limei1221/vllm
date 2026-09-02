@@ -176,8 +176,8 @@ repos:
     language: python
     types: [python]
   - id: lean-tree-guard
-    name: Check the lean tree for banned paths and terms
-    entry: python tools/check_lean_tree.py --tree
+    name: Check the lean tree for banned paths, terms and budgets
+    entry: python tools/check_lean_tree.py --all
     language: python
     pass_filenames: false
     additional_dependencies: [regex]

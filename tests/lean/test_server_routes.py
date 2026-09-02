@@ -5,9 +5,6 @@
 from __future__ import annotations
 
 from argparse import Namespace
-from types import SimpleNamespace
-
-import pytest
 
 
 def _make_args() -> Namespace:
@@ -41,5 +38,4 @@ def test_server_has_only_supported_routes() -> None:
         "/v1/completions",
         "/v1/models",
         "/health",
-        "/metrics",
     }

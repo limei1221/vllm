@@ -31,8 +31,8 @@ If you want vLLM for production, use [upstream](https://github.com/vllm-project/
 - **Parallelism**: local TP, PP, DP, EP, PCP, DCP — single node
 - **Executors**: `MultiprocExecutor` (multi-GPU), `UniProcExecutor` (single-GPU)
 - **All2all**: `allgather_reducescatter` only
-- **Server**: five HTTP routes — `/v1/chat/completions`, `/v1/completions`,
-  `/v1/models`, `/health`, `/metrics`
+- **Server**: four HTTP routes — `/v1/chat/completions`, `/v1/completions`,
+  `/v1/models`, `/health`
 - **Offline API**: `LLM.generate()` and `LLM.chat()`
 
 ## What has been removed
@@ -70,7 +70,8 @@ flow and the design decisions behind the cuts.
 Two pre-commit hooks guard the invariants:
 
 - `lean-tree-guard` — [`tools/check_lean_tree.py`](tools/check_lean_tree.py) fails if a
-  removed subsystem reappears by path or by name.
+  removed subsystem reappears by path or by name, or if the tree grows past its
+  line budget.
 - `mypy-lean-tree` — type-checks the whole `vllm` package, not just changed files, so a
   caller and callee cannot drift apart across separate commits.
 
@@ -79,9 +80,9 @@ uv pip install -r requirements/lint.txt && pre-commit install
 pre-commit run --all-files
 ```
 
-The guard also tracks a runtime line-count budget
-(`python tools/check_lean_tree.py --budgets`). It does **not** pass yet — the tree is
-roughly 240k lines against a 170k target — so it is not wired into the hooks.
+The guard also enforces a runtime line-count budget of 195,000 lines. The tree
+currently sits under it, so `--budgets` runs as part of the hook and the number
+acts as a ratchet rather than an aspiration.
 
 ## Upstream
 

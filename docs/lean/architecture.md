@@ -6,8 +6,8 @@ and EAGLE.
 
 ## Request Flow
 
-```
-Client → FastAPI (5 routes) → AsyncLLM → EngineCore → Scheduler → GPUModelRunner
+```text
+Client → FastAPI (4 routes) → AsyncLLM → EngineCore → Scheduler → GPUModelRunner
                                                                           ↓
                                                     MultiprocExecutor → Workers
 ```
@@ -20,18 +20,18 @@ Client → FastAPI (5 routes) → AsyncLLM → EngineCore → Scheduler → GPUM
 - **Two attention backends**: FlashAttention (prefill) + FlashMLA (decode)
 - **Two MoE dtypes**: BF16 (Triton) + FP8 (DeepGEMM)
 - **One all2all backend**: allgather_reducescatter
-- **Five routes**: `/v1/chat/completions`, `/v1/completions`, `/v1/models`, `/health`, `/metrics`
+- **Four routes**: `/v1/chat/completions`, `/v1/completions`, `/v1/models`, `/health`
 - **Two offline methods**: `LLM.generate()` and `LLM.chat()`
 
 ## Test Coverage Map
 
 | Acceptance Criterion | Test File |
-|---|---|
+| --- | --- |
 | Public imports | `tests/lean/test_public_contract.py` |
 | DeepSeek architectures only | `tests/lean/test_model_resolution.py` |
 | Hopper enforcement | `tests/lean/test_runtime_validation.py` |
 | Safetensors-only loading | `tests/model_executor/model_loader/test_safetensors_only_loader.py` |
-| Five routes only | `tests/lean/test_server_routes.py` |
+| Four routes only | `tests/lean/test_server_routes.py` |
 | Local DP round-robin | `tests/entrypoints/openai/test_dp_supervisor.py` |
 | Offline API surface | `tests/lean/test_offline_contract.py` |
 | Speculative methods | `tests/lean/test_focused_cli.py` |
