@@ -3,7 +3,6 @@
 from typing import Any
 
 import torch
-import torch.nn as nn
 
 from vllm.config import VllmConfig
 from vllm.config.compilation import CUDAGraphMode
@@ -43,18 +42,6 @@ class AutoRegressiveSpeculator(DraftModelSpeculator):
         self.prefill_cudagraph_manager: SpeculatorCudaGraphManager | None = None
         self.decode_cudagraph_manager: SpeculatorCudaGraphManager | None = None
         self.use_fused_multi_step_decode = False
-
-    def load_model(self, target_model: nn.Module) -> None:
-        super().load_model(target_model)
-        if not self.supports_mm_inputs:
-            return
-
-        self.inputs_embeds = torch.zeros(
-            self.max_num_tokens,
-            self.hidden_size,
-            dtype=self.dtype,
-            device=self.device,
-        )
 
     # Lifecycle hooks for model-specific optimizations. Subclasses override
     # the ones they need. These fire in both `capture` and `propose` so that
@@ -377,19 +364,6 @@ class AutoRegressiveSpeculator(DraftModelSpeculator):
             batch_descriptor=batch_descriptor,
         ):
             inputs_embeds = None
-            if self.supports_mm_inputs:
-                assert self.inputs_embeds is not None
-                # Merge multimodal embeddings with input ids.
-                mm_embeds, is_mm_embed = mm_inputs or (None, None)
-                num_input_tokens = (
-                    is_mm_embed.shape[0] if is_mm_embed is not None else num_tokens
-                )
-                self.inputs_embeds[:num_input_tokens] = self.model.embed_input_ids(
-                    self.input_buffers.input_ids[:num_input_tokens],
-                    multimodal_embeddings=mm_embeds,
-                    is_multimodal=is_mm_embed,
-                )
-                inputs_embeds = self.inputs_embeds[:num_tokens]
 
             model_inputs = dict(
                 input_ids=self.input_buffers.input_ids[:num_tokens],

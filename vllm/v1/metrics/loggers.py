@@ -22,7 +22,6 @@ from vllm.v1.metrics.prometheus import unregister_vllm_metrics
 from vllm.v1.metrics.stats import (
     CachingMetrics,
     IterationStats,
-    MultiModalCacheStats,
     PromptTokenStats,
     SchedulerStats,
 )
@@ -56,7 +55,6 @@ class StatLoggerBase(ABC):
         self,
         scheduler_stats: SchedulerStats | None,
         iteration_stats: IterationStats | None,
-        mm_cache_stats: MultiModalCacheStats | None = None,
         engine_idx: int = 0,
     ): ...
 
@@ -184,7 +182,6 @@ class LoggingStatLogger(StatLoggerBase):
         self,
         scheduler_stats: SchedulerStats | None,
         iteration_stats: IterationStats | None,
-        mm_cache_stats: MultiModalCacheStats | None = None,
         engine_idx: int = 0,
     ):
         """Log Stats to standard output."""
@@ -213,8 +210,6 @@ class LoggingStatLogger(StatLoggerBase):
                 self.last_scheduler_stats = scheduler_stats
             if (perf_stats := scheduler_stats.perf_stats) and self._enable_perf_stats():
                 self.perf_metrics_logging.observe(perf_stats)
-        if mm_cache_stats:
-            self.mm_caching_metrics.observe(mm_cache_stats)
 
     def _update_stats(self):
         now = time.monotonic()
@@ -338,7 +333,6 @@ class AggregatedLoggingStatLogger(LoggingStatLogger, AggregateStatLoggerBase):
         self,
         scheduler_stats: SchedulerStats | None,
         iteration_stats: IterationStats | None,
-        mm_cache_stats: MultiModalCacheStats | None = None,
         engine_idx: int = 0,
     ):
         if engine_idx not in self.engine_indexes:
@@ -348,7 +342,6 @@ class AggregatedLoggingStatLogger(LoggingStatLogger, AggregateStatLoggerBase):
             self,
             scheduler_stats,
             iteration_stats,
-            mm_cache_stats=mm_cache_stats,
             engine_idx=engine_idx,
         )
         if scheduler_stats is not None:
@@ -402,7 +395,6 @@ class PerEngineStatLoggerAdapter(AggregateStatLoggerBase):
         self,
         scheduler_stats: SchedulerStats | None,
         iteration_stats: IterationStats | None,
-        mm_cache_stats: MultiModalCacheStats | None = None,
         engine_idx: int = 0,
     ):
         if engine_idx not in self.per_engine_stat_loggers:
@@ -411,7 +403,6 @@ class PerEngineStatLoggerAdapter(AggregateStatLoggerBase):
         self.per_engine_stat_loggers[engine_idx].record(
             scheduler_stats,
             iteration_stats,
-            mm_cache_stats=mm_cache_stats,
             engine_idx=engine_idx,
         )
 
@@ -1059,7 +1050,6 @@ class PrometheusStatLogger(AggregateStatLoggerBase):
         self,
         scheduler_stats: SchedulerStats | None,
         iteration_stats: IterationStats | None,
-        mm_cache_stats: MultiModalCacheStats | None = None,
         engine_idx: int = 0,
     ):
         """Log to prometheus."""
@@ -1121,10 +1111,6 @@ class PrometheusStatLogger(AggregateStatLoggerBase):
                     idle_hist.observe(event.idle_seconds)
                     for gap in event.reuse_gaps_seconds:
                         reuse_hist.observe(gap)
-
-        if mm_cache_stats is not None:
-            self.counter_mm_cache_queries[engine_idx].inc(mm_cache_stats.queries)
-            self.counter_mm_cache_hits[engine_idx].inc(mm_cache_stats.hits)
 
         if iteration_stats is None:
             return
@@ -1320,7 +1306,6 @@ class StatLoggerManager:
         self,
         scheduler_stats: SchedulerStats | None,
         iteration_stats: IterationStats | None,
-        mm_cache_stats: MultiModalCacheStats | None = None,
         engine_idx: int | None = None,
     ):
         if engine_idx is None:
@@ -1329,7 +1314,6 @@ class StatLoggerManager:
             stat_logger.record(
                 scheduler_stats,
                 iteration_stats,
-                mm_cache_stats=mm_cache_stats,
                 engine_idx=engine_idx,
             )
 

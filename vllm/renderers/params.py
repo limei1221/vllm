@@ -199,7 +199,7 @@ class TokenizeParams:
 
     return_token_offsets: bool = False
     """If true, request char-level (start, end) offsets per token. Honored
-    only for Fast (Rust-backed) tokenizers with text input and no multimodal
+    only for Fast (Rust-backed) tokenizers with text input and no extra
     data; otherwise silently ignored."""
 
     needs_detokenization: bool = False

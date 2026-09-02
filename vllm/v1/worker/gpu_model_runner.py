@@ -191,7 +191,6 @@ from .utils import (
 
 if TYPE_CHECKING:
     from vllm.v1.core.sched.output import SchedulerOutput
-    from vllm.v1.worker.encoder_cudagraph import EncoderCudaGraphManager
 
 logger = init_logger(__name__)
 
@@ -385,11 +384,7 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
 
         self.is_pooling_model = model_config.runner_type == "pooling"
         self.enable_prompt_embeds = model_config.enable_prompt_embeds
-        self.is_multimodal_raw_input_only_model = (
-            model_config.is_multimodal_raw_input_only_model
-        )
-        # These will be overridden in load_model()
-        self.is_multimodal_pruning_enabled = False
+        # This will be overridden in load_model()
         self.requires_sequential_video_encoding = False
         # Set to True after init_routed_experts_capturer() completes.
         # Prevents routed experts code from running during profiling/dummy run.
@@ -459,7 +454,6 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
         self.encoder_cache: dict[str, torch.Tensor] = {}
 
         # Encoder CUDA graph manager (initialized after model load if enabled)
-        self.encoder_cudagraph_manager: EncoderCudaGraphManager | None = None
 
         self.use_aux_hidden_state_outputs = False
         # Set up speculative decoding.
@@ -1415,7 +1409,7 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
         num_common_tokens = len(sample_flattened_indices)
         total_without_spec = total_num_scheduled_tokens - total_num_spec_tokens
         if self.enable_prompt_embeds:
-            # The multimodal embed path reads is_token_ids.gpu; its .cpu copy is
+            # The embed path reads is_token_ids.gpu; its .cpu copy is
             # refreshed every step but the async fast paths below only scatter
             # input_ids.gpu, so refresh is_token_ids.gpu here too.
             self.is_token_ids.copy_to_gpu(total_num_scheduled_tokens)
@@ -2482,7 +2476,7 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
         else:
             # For text-only models, we use token ids as input.
             # While it is possible to use embeddings as input just like the
-            # multimodal models, it is not desirable for performance since
+            # some models, it is not desirable for performance since
             # then the embedding layer is not included in the CUDA graph.
             input_ids = self.input_ids.gpu[:num_input_tokens]
             inputs_embeds = None
@@ -3826,7 +3820,7 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
             num_rejected_tokens_gpu = None
             if spec_decode_metadata is None:
                 token_indices_to_sample = None
-                # input_ids can be None for multimodal models.
+                # input_ids can be None when embeddings are supplied.
                 target_token_ids = self.input_ids.gpu[:num_scheduled_tokens]
                 target_positions = self._get_positions(num_scheduled_tokens)
                 if self.use_aux_hidden_state_outputs:
@@ -4437,12 +4431,6 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
                 of max_query_len. Used to profile attention workspace that
                 scales with context length.
         """
-        mm_config = self.vllm_config.model_config.multimodal_config
-        if mm_config and mm_config.mm_encoder_only:
-            # The current dummy run only covers LM execution, so we can skip it.
-            # mm encoder dummy run may need to add in the future.
-            return torch.tensor([]), torch.tensor([])
-
         assert (
             cudagraph_runtime_mode is None
             or cudagraph_runtime_mode.is_valid_runtime_mode()
@@ -4782,11 +4770,6 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
         # like `inf` or `nan`.
         # To avoid breaking the sampler, we use a random tensor here instead.
 
-        mm_config = self.vllm_config.model_config.multimodal_config
-        if mm_config and mm_config.mm_encoder_only:
-            # MM Encoder only model no need to run sampler.
-            return torch.tensor([])
-
         hidden_states = torch.rand_like(hidden_states)
 
         logits = self.model.compute_logits(hidden_states)
@@ -4894,8 +4877,6 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
         return sampler_output
 
     def profile_run(self) -> None:
-        # Profile with multimodal encoder & encoder cache.
-
         # Add `is_profile` here to pre-allocate communication buffers
         hidden_states, last_hidden_states = self._dummy_run(
             self.max_num_tokens, is_profile=True
@@ -4974,7 +4955,6 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
             # graph destruction can surface HSA faults in the next engine startup.
             CUDAGraphWrapper.clear_all_graphs()
             BreakableCUDAGraphWrapper.clear_all_graphs()
-            self.encoder_cudagraph_manager = None
         self.compilation_config.static_forward_context.clear()
         self.model = None  # type: ignore[assignment]
         _ROPE_DICT.clear()
@@ -5020,39 +5000,6 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
         logger.debug("Cleaned up profiling KV cache and CUDA graphs")
 
     @torch.inference_mode()
-    def _create_encoder_cudagraph_manager(self) -> "EncoderCudaGraphManager | None":
-        return None
-
-        # Use get_model() to unwrap CUDAGraphWrapper/UBatchWrapper, because
-        # @runtime_checkable Protocol isinstance() checks do not work through
-        # __getattr__ forwarding.
-        from vllm.model_executor.models.interfaces import (
-            SupportsEncoderCudaGraph,
-            supports_encoder_cudagraph,
-        )
-        from vllm.v1.worker.encoder_cudagraph import (
-            EncoderCudaGraphManager,
-        )
-
-        raw_model = self.get_model()
-        if not supports_encoder_cudagraph(raw_model):
-            return None
-
-        return EncoderCudaGraphManager(
-            vllm_config=self.vllm_config,
-            device=self.device,
-            dtype=self.dtype,
-            model=cast(SupportsEncoderCudaGraph, raw_model),
-        )
-
-    @torch.inference_mode()
-    def _maybe_init_encoder_cudagraph_manager(self) -> None:
-        if self.encoder_cudagraph_manager is None:
-            self.encoder_cudagraph_manager = self._create_encoder_cudagraph_manager()
-            if self.encoder_cudagraph_manager is not None:
-                logger.info("Initialized EncoderCudaGraphManager for vision encoder")
-
-    @torch.inference_mode()
     def profile_cudagraph_memory(self) -> int:
         with set_current_vllm_config(self.vllm_config):
             self._init_minimal_kv_cache_for_profiling()
@@ -5060,17 +5007,8 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
         saved_num_cudagraph_captured = compilation_counter.num_cudagraph_captured
 
         capture_descs = self.cudagraph_dispatcher.get_capture_descs()
-        # Use a temporary manager for memory profiling. The persistent manager
-        # is initialized later so it does not keep profiling-only graph state.
-        encoder_cudagraph_manager = self._create_encoder_cudagraph_manager()
 
-        decoder_graphs = sum(len(descs) for _, descs in capture_descs)
-        encoder_graphs = (
-            encoder_cudagraph_manager.get_num_graphs_to_capture()
-            if encoder_cudagraph_manager is not None
-            else 0
-        )
-        total_graphs = decoder_graphs + encoder_graphs
+        total_graphs = sum(len(descs) for _, descs in capture_descs)
         if total_graphs == 0:
             logger.debug("No CUDA graphs will be captured, skipping profiling")
             self._cleanup_profiling_kv_cache()
@@ -5083,17 +5021,11 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
                 if descs
             ),
         ]
-        if encoder_graphs > 0:
-            graph_groups.append(
-                f"ENCODER={encoder_graphs} "
-                f"(largest={encoder_cudagraph_manager.token_budgets[-1]})"
-            )
 
         logger.info("Profiling CUDA graph memory: %s", ", ".join(graph_groups))
 
         # Use a temporary pool for profiling to avoid fragmentation in the main pool.
         profiling_pool = current_platform.graph_pool_handle()
-        encoder_profiling_pool = current_platform.graph_pool_handle()
         original_pools: dict[int, Any] = {}
         all_wrappers = list(CUDAGraphWrapper._all_instances) + list(
             BreakableCUDAGraphWrapper._all_instances
@@ -5104,7 +5036,6 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
 
         shared_memory_estimate = {}
         per_graph_estimate = {}
-        encoder_memory_estimate = 0
 
         # On ROCm, capture these throwaway profiling graphs on vLLM's dedicated
         # compute stream instead of the fresh side stream graph_capture()
@@ -5173,25 +5104,10 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
                         len(descs),
                         per_graph / (1 << 20),
                     )
-
-                if encoder_cudagraph_manager is not None:
-                    mem_before = torch.accelerator.get_memory_info()[0]
-                    encoder_cudagraph_manager.capture(graph_pool=encoder_profiling_pool)
-                    torch.accelerator.synchronize()
-                    free_after = torch.accelerator.get_memory_info()[0]
-                    encoder_memory_estimate = max(mem_before - free_after, 0)
-
-                    logger.debug(
-                        "Estimated encoder CUDA graph memory: %.2f MiB for %d graphs",
-                        encoder_memory_estimate / (1 << 20),
-                        encoder_graphs,
-                    )
         finally:
             set_cudagraph_capturing_enabled(False)
             CUDAGraphWrapper.clear_all_graphs()
             BreakableCUDAGraphWrapper.clear_all_graphs()
-            if encoder_cudagraph_manager is not None:
-                encoder_cudagraph_manager.clear()
             all_wrappers = list(CUDAGraphWrapper._all_instances) + list(
                 BreakableCUDAGraphWrapper._all_instances
             )
@@ -5207,12 +5123,9 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
         # FULL and PIECEWISE graphs share the global pool at runtime and are
         # never replayed concurrently, so the pool overlays their memory.
         # Take the max to avoid double-counting the overlap.
-        decoder_estimate = max(shared_memory_estimate.values(), default=0) + sum(
+        total_estimate = max(shared_memory_estimate.values(), default=0) + sum(
             per_graph_estimate.values()
         )
-        # Encoder graphs use a manager-local pool at runtime, separate from the
-        # decoder pool, so add their estimate instead of overlaying it.
-        total_estimate = decoder_estimate + encoder_memory_estimate
         logger.info(
             "Estimated CUDA graph memory: %.2f GiB total",
             total_estimate / (1 << 30),
@@ -5228,9 +5141,6 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
                 "ensure `cudagraph_mode` was not manually set to `NONE`"
             )
             return 0
-
-        # Initialize encoder CUDA graph manager if enabled.
-        self._maybe_init_encoder_cudagraph_manager()
 
         compilation_counter.num_gpu_runner_capture_triggers += 1
 
@@ -5293,11 +5203,6 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
                     profiler=profiler,
                 )
                 torch.accelerator.synchronize()
-
-            # Capture encoder CUDA graphs if enabled
-            if self.encoder_cudagraph_manager is not None:
-                encoder_graph_pool = current_platform.graph_pool_handle()
-                self.encoder_cudagraph_manager.capture(graph_pool=encoder_graph_pool)
 
             torch.accelerator.synchronize()
             end_free_gpu_memory = torch.accelerator.get_memory_info()[0]

@@ -1,25 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 from abc import ABC, abstractmethod
-from typing import Any, cast
+from typing import Any
 
 import torch
 import torch.nn as nn
 
 from vllm.config import VllmConfig
 from vllm.config.compilation import CUDAGraphMode
-from vllm.model_executor.models.interfaces import (
-    SupportsEncoderCudaGraph,
-    supports_encoder_cudagraph,
-)
 from vllm.tasks import GenerationTask
 from vllm.v1.attention.backend import AttentionCGSupport
 from vllm.v1.core.sched.output import NewRequestData
 from vllm.v1.kv_cache_interface import KVCacheConfig
-from vllm.v1.worker.encoder_cudagraph import EncoderCudaGraphManager
 from vllm.v1.worker.gpu.input_batch import InputBatch
-from vllm.v1.worker.gpu.mm.encoder_cache import EncoderCache
-from vllm.v1.worker.gpu.mm.encoder_runner import EncoderRunner
 from vllm.v1.worker.gpu.states import RequestState
 from vllm.v1.worker.utils import AttentionGroup
 
@@ -47,7 +40,6 @@ class ModelState(ABC):
         self,
         vllm_config: VllmConfig,
         model: nn.Module,
-        encoder_cache: EncoderCache | None,
         device: torch.device,
     ) -> None:
         self.vllm_config = vllm_config
@@ -61,40 +53,6 @@ class ModelState(ABC):
         self.max_num_tokens = self.scheduler_config.max_num_batched_tokens
         self.inputs_embeds_size = self.model_config.get_inputs_embeds_size()
         self.dtype = self.model_config.dtype
-
-        self.supports_mm_inputs = encoder_cache is not None
-        if encoder_cache is not None:
-            enable_encoder_cuda_graph = (
-                not self.model_config.enforce_eager
-                and vllm_config.compilation_config.cudagraph_mm_encoder
-                and supports_encoder_cudagraph(model)
-            )
-            cudagraph_manager = (
-                EncoderCudaGraphManager(
-                    vllm_config=vllm_config,
-                    device=device,
-                    dtype=self.dtype,
-                    model=cast(SupportsEncoderCudaGraph, model),
-                )
-                if enable_encoder_cuda_graph
-                else None
-            )
-
-            self.encoder_cache = encoder_cache
-            observability_config = vllm_config.observability_config
-            self.encoder_runner = EncoderRunner(
-                model=self.model,
-                max_num_tokens=self.max_num_tokens,
-                hidden_size=self.inputs_embeds_size,
-                encoder_cache=encoder_cache,
-                dtype=self.dtype,
-                device=self.device,
-                cudagraph_manager=cudagraph_manager,
-                enable_timing=bool(
-                    observability_config
-                    and observability_config.enable_mm_processor_stats
-                ),
-            )
 
     def get_supported_generation_tasks(self) -> tuple[GenerationTask, ...]:
         from vllm.model_executor.models.interfaces import (
@@ -152,52 +110,6 @@ class ModelState(ABC):
     ) -> None:
         return None
 
-    @abstractmethod
-    def get_mm_embeddings(
-        self,
-        scheduled_encoder_inputs: dict[str, list[int]],
-        input_batch: InputBatch,
-        req_states: RequestState,
-    ) -> torch.Tensor | None:
-        raise NotImplementedError
-
-    def dummy_inputs_embeds(self, num_tokens: int) -> torch.Tensor | None:
-        """Pre-allocated inputs_embeds buffer for dummy runs (contents unused)."""
-        return None
-
-    def execute_mm_encoder(
-        self, scheduled_encoder_inputs: dict[str, list[int]]
-    ) -> None:
-        """Run the multi-modal encoder and cache its outputs by `mm_hash`.
-
-        The encode half of `get_mm_embeddings`, without the gather, for callers
-        that run no language model.
-        """
-        mm_hashes, mm_kwargs = self.encoder_runner.prepare_mm_inputs(
-            scheduled_encoder_inputs
-        )
-        if mm_kwargs:
-            with self.encoder_runner.timed_encoder_operation(
-                scheduled_encoder_inputs.keys()
-            ):
-                encoder_outputs = self.encoder_runner.execute_mm_encoder(mm_kwargs)
-            self.encoder_cache.encoder_outputs.update(zip(mm_hashes, encoder_outputs))
-
-    def gather_mm_embeddings(
-        self, input_batch: InputBatch, draft_lookahead: int = 0
-    ) -> tuple[list[torch.Tensor], torch.Tensor]:
-        """Gather cached multimodal embeddings."""
-        return self.encoder_runner.gather_mm_embeddings(
-            input_batch.req_ids,
-            input_batch.num_tokens,
-            input_batch.num_scheduled_tokens,
-            input_batch.query_start_loc_np,
-            input_batch.prefill_len_np,
-            input_batch.num_computed_tokens_np,
-            draft_lookahead=draft_lookahead,
-        )
-
-    @abstractmethod
     def prepare_inputs(
         self, input_batch: InputBatch, req_states: RequestState
     ) -> dict[str, Any]:

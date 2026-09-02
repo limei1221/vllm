@@ -281,11 +281,7 @@ class WorkerWrapperBase:
                 "This argument is needed for mm_processor_cache_type='shm'."
             )
 
-            mm_config = vllm_config.model_config.multimodal_config
-            if mm_config and mm_config.mm_processor_cache_type == "shm":
-                raise ValueError(msg)
-            else:
-                logger.warning_once(msg)
+            logger.warning_once(msg)
 
             self.mm_receiver_cache = None
         else:

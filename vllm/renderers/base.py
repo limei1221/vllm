@@ -27,7 +27,6 @@ from vllm.logger import init_logger
 from vllm.tokenizers import TokenizerLike
 from vllm.utils.async_utils import make_async
 from vllm.utils.torch_utils import set_default_torch_num_threads
-from vllm.v1.metrics.stats import MultiModalCacheStats
 
 from .embed_utils import safe_load_prompt_embeds
 from .inputs import (
@@ -65,7 +64,7 @@ class BaseRenderer(ABC, Generic[_T]):
         self.tokenizer = tokenizer
 
         # Thread pool executor for blocking tokenizer operations.  The
-        # multimodal processor receives a deep-copied tokenizer (see #36557)
+        # processor receives a deep-copied tokenizer (see #36557)
         # so it is safe to run tokenization and MM preprocessing concurrently.
         pool_workers = config.model_config.renderer_num_workers
         self._executor = ThreadPoolExecutor(max_workers=pool_workers)
@@ -77,7 +76,7 @@ class BaseRenderer(ABC, Generic[_T]):
         # Offload tokenization to the thread pool. The sync
         # ``_tokenize_prompt`` already encapsulates the unified ``__call__``
         # path and char-offset extraction, so the async variant is just it
-        # offloaded (mirrors ``_process_multimodal_async`` below).
+        # offloaded (mirrors the async processing path below).
         self._tokenize_prompt_async = make_async(
             self._tokenize_prompt, executor=self._executor
         )
@@ -85,7 +84,6 @@ class BaseRenderer(ABC, Generic[_T]):
 
         self.mm_processor = None
         self._readonly_mm_processor = None
-        self._mm_cache_stats: MultiModalCacheStats | None = None
         self._clear_mm_cache_async = make_async(
             self.clear_mm_cache, executor=self._mm_executor
         )
@@ -108,30 +106,10 @@ class BaseRenderer(ABC, Generic[_T]):
         """No multi-modal processor cache exists in this build."""
         return None
 
-    def stat_mm_cache(self) -> MultiModalCacheStats | None:
-        mm_cache_stats = self._mm_cache_stats
-        if mm_cache_stats is None:
-            return None
-
-        self._mm_cache_stats = MultiModalCacheStats()
-
-        return mm_cache_stats
-
-    def update_mm_cache_stats(self) -> None:
-        mm_processor_cache = self.mm_processor_cache
-        mm_cache_stats = self._mm_cache_stats
-
-        if mm_processor_cache and mm_cache_stats:
-            delta = mm_processor_cache.make_stats(delta=True)
-            mm_cache_stats.record(delta.total, delta.hits)
-
     def clear_mm_cache(self) -> None:
         mm_processor_cache = self.mm_processor_cache
         if mm_processor_cache is not None:
             mm_processor_cache.clear_cache()
-
-        if self._mm_cache_stats is not None:
-            self._mm_cache_stats.reset = True
 
     def warmup(self, chat_params: ChatParams) -> None:
         """
@@ -158,8 +136,8 @@ class BaseRenderer(ABC, Generic[_T]):
                 logger.warning("Chat template warmup failed", exc_info=True)
 
     async def clear_mm_cache_async(self) -> None:
-        """Serialize clear_mm_cache through the multimodal executor to avoid
-        races with concurrent process_inputs on the mm_processor_cache."""
+        """Serialize clear_mm_cache through the executor to avoid races
+        with concurrent process_inputs on the mm_processor_cache."""
         await self._clear_mm_cache_async()
 
     def shutdown(self) -> None:
@@ -543,7 +521,7 @@ class BaseRenderer(ABC, Generic[_T]):
         *,
         skip_mm_cache: bool = False,
     ) -> TokensInput:
-        """Process token inputs, with multimodal preprocessing offloaded
+        """Process token inputs, with preprocessing offloaded
         to the shared thread pool in the async variant.
         """
         prompt_token_ids = prompt["prompt_token_ids"]

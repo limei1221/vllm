@@ -13,7 +13,6 @@ import torch
 from vllm.config import CacheConfig, VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.attention import Attention
-from vllm.model_executor.models.interfaces import MultiModalEmbeddings
 from vllm.model_executor.models.utils import extract_layer_index
 from vllm.platforms import current_platform
 from vllm.triton_utils import tl, triton
@@ -409,36 +408,6 @@ def prepare_kernel_block_sizes(
                 f"unknown kv cache spec {kv_cache_group.kv_cache_spec}"
             )
     return kernel_block_sizes
-
-
-def sanity_check_mm_encoder_outputs(
-    mm_embeddings: MultiModalEmbeddings,
-    expected_num_items: int,
-) -> None:
-    """
-    Perform sanity checks for the result of
-    [`vllm.model_executor.models.SupportsMultiModal.embed_multimodal`][].
-    """
-    assert isinstance(mm_embeddings, (list, tuple, torch.Tensor)), (
-        "Expected multimodal embeddings to be a list/tuple of 2D tensors, "
-        f"or a single 3D tensor, but got {type(mm_embeddings)} "
-        "instead. This is most likely due to incorrect implementation "
-        "of the model's `embed_multimodal` method."
-    )
-
-    assert len(mm_embeddings) == expected_num_items, (
-        "Expected number of multimodal embeddings to match number of "
-        f"input items: {expected_num_items}, but got {len(mm_embeddings)=} "
-        "instead. This is most likely due to incorrect implementation "
-        "of the model's `embed_multimodal` method."
-    )
-
-    assert all(e.ndim == 2 for e in mm_embeddings), (
-        "Expected multimodal embeddings to be a sequence of 2D tensors, "
-        f"but got tensors with shapes {[e.shape for e in mm_embeddings]} "
-        "instead. This is most likely due to incorrect implementation "
-        "of the model's `embed_multimodal` method."
-    )
 
 
 def request_memory(init_snapshot: MemorySnapshot, cache_config: CacheConfig) -> int:

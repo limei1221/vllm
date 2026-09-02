@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """
 NOTE: Coding style guide for this file:
-This model runner is shared by all models: text and multimodal, generative
+This model runner is shared by all models: generative
 and embedding, public and private. As a result, this file must only contain
 code that is common to every model. Model-specific behavior belongs in the
 appropriate model-specific files.
@@ -205,8 +205,7 @@ class GPUModelRunner:
         self.cp_interleave = self.parallel_config.cp_kv_cache_interleave_size
 
         self.supports_mm_inputs = False
-        self.encoder_cache = None
-        self.ec_connector = get_ec_connector(vllm_config, self.encoder_cache)
+        self.ec_connector = get_ec_connector(vllm_config)
 
         # Speculative decoding.
         self.speculator = None
@@ -338,9 +337,7 @@ class GPUModelRunner:
         )
 
         # Initialize the components that require the model.
-        self.model_state = init_model_state(
-            self.vllm_config, self.model, self.encoder_cache, self.device
-        )
+        self.model_state = init_model_state(self.vllm_config, self.model, self.device)
 
         self.decode_query_len = (
             self.num_speculative_steps

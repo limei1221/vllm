@@ -13,7 +13,6 @@ from typing_extensions import TypeVar
 import vllm.envs as envs
 from vllm.config import ParallelConfig, VllmConfig
 from vllm.distributed import stateless_destroy_torch_distributed_process_group
-from vllm.distributed.parallel_state import get_dp_group
 from vllm.engine.arg_utils import EngineArgs
 from vllm.inputs import EngineInput, PromptType
 from vllm.logger import init_logger
@@ -70,10 +69,7 @@ class LLMEngine:
 
         # important: init dp group before init the engine_core
         # In the decoupled engine case this is handled in EngineCoreProc.
-        if (
-            not multiprocess_mode
-            and parallel_config.data_parallel_size > 1
-        ):
+        if not multiprocess_mode and parallel_config.data_parallel_size > 1:
             self.dp_group = parallel_config.stateless_init_dp_group()
         else:
             self.dp_group = None
@@ -312,7 +308,6 @@ class LLMEngine:
                 self.logger_manager.record(
                     scheduler_stats=outputs.scheduler_stats,
                     iteration_stats=iteration_stats,
-                    mm_cache_stats=self.renderer.stat_mm_cache(),
                 )
                 if outputs.outputs:
                     self.do_log_stats_with_interval()

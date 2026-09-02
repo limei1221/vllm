@@ -17,7 +17,6 @@ from vllm.v1.attention.backend import (
 from vllm.v1.core.sched.output import NewRequestData
 from vllm.v1.kv_cache_interface import EncoderOnlyAttentionSpec, KVCacheConfig
 from vllm.v1.worker.gpu.input_batch import InputBatch
-from vllm.v1.worker.gpu.mm.encoder_cache import EncoderCache
 from vllm.v1.worker.gpu.model_states.default import DefaultModelState
 from vllm.v1.worker.gpu.states import RequestState
 from vllm.v1.worker.utils import AttentionGroup
@@ -38,10 +37,9 @@ class EncoderOnlyModelState(DefaultModelState):
         self,
         vllm_config: VllmConfig,
         model: nn.Module,
-        encoder_cache: EncoderCache | None,
         device: torch.device,
     ):
-        super().__init__(vllm_config, model, encoder_cache, device)
+        super().__init__(vllm_config, model, device)
 
         cache_config = vllm_config.cache_config
         if cache_config.cache_dtype == "auto":

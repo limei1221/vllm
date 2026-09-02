@@ -390,7 +390,6 @@ class OnlineRenderer:
     ) -> tuple[list[ConversationMessage], list[EngineInput]]:
         """Copied from GenerateBaseServing._preprocess_chat."""
         renderer = self.renderer
-        mm_config = self.model_config.multimodal_config
 
         default_template_kwargs = merge_kwargs(
             default_template_kwargs,
@@ -408,7 +407,7 @@ class OnlineRenderer:
             default_template, default_template_content_format
         ).with_defaults(
             default_template_kwargs,
-            default_media_io_kwargs=(mm_config.media_io_kwargs if mm_config else None),
+            default_media_io_kwargs=None,
             default_mm_processor_kwargs=getattr(request, "mm_processor_kwargs", None),
         )
 

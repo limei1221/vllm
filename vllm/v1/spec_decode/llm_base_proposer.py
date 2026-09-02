@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import dataclasses
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
@@ -24,12 +24,7 @@ from vllm.forward_context import set_forward_context
 from vllm.logger import init_logger
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
 from vllm.model_executor.model_loader import get_model
-from vllm.model_executor.models import (
-    supports_multimodal,
-    supports_multimodal_embeddings,
-)
 from vllm.model_executor.models.deepseek_eagle3 import Eagle3DeepseekV2ForCausalLM
-from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.utils.torch_utils import PIN_MEMORY, async_tensor_h2d
 from vllm.v1.attention.backend import CommonAttentionMetadata
 from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
@@ -158,7 +153,6 @@ class SpecDecodeBaseProposer:
             self.max_num_tokens, dtype=torch.int32, device=device
         )
         # Use draft model's M-RoPE setting, not target model's
-        # Draft models may be text-only even if target is multimodal
         self.uses_mrope = self.draft_model_config.uses_mrope
         self.uses_xdrope_dim = self.vllm_config.model_config.uses_xdrope_dim
         self.draft_uses_xdrope_dim = self.draft_model_config.uses_xdrope_dim
@@ -205,7 +199,6 @@ class SpecDecodeBaseProposer:
 
         if self.needs_extra_input_slots:
             self._raise_if_padded_drafter_batch_disabled()
-            self._warn_if_multimodal()
             self._raise_if_mrope()
 
         self.is_rejected_token_mask: torch.Tensor | None = None
@@ -255,14 +248,6 @@ class SpecDecodeBaseProposer:
                 "Speculative Decoding with draft models or parallel drafting only "
                 "supports padded drafter batch. Please unset "
                 "disable_padded_drafter_batch in the speculative_config."
-            )
-
-    def _warn_if_multimodal(self):
-        if self.supports_mm_inputs:
-            logger.warning(
-                "Speculative Decoding with draft models or parallel drafting "
-                "does not fully support multimodal models yet. "
-                "Proceeding with text-only speculative decoding."
             )
 
     def _raise_if_mrope(self):
@@ -640,14 +625,8 @@ class SpecDecodeBaseProposer:
             # copy inputs to buffer for cudagraph
             self.input_ids[:batch_size] = input_ids
             self.hidden_states[:batch_size] = hidden_states
-            if self.supports_mm_inputs:
-                self.inputs_embeds[:batch_size] = self.model.embed_input_ids(input_ids)
-
-                input_ids = None
-                inputs_embeds = self.inputs_embeds[:input_batch_size]
-            else:
-                input_ids = self.input_ids[:input_batch_size]
-                inputs_embeds = None
+            input_ids = self.input_ids[:input_batch_size]
+            inputs_embeds = None
 
             # Run the model.
             model_kwargs = {
@@ -893,20 +872,9 @@ class SpecDecodeBaseProposer:
         num_input_tokens: int,
         mm_embed_inputs: tuple[list[torch.Tensor], torch.Tensor] | None,
     ) -> tuple[dict[str, Any], int]:
-        if self.supports_mm_inputs:
-            mm_embeds, is_mm_embed = mm_embed_inputs or (None, None)
-
-            self.inputs_embeds[:num_tokens] = self.model.embed_input_ids(
-                self.input_ids[:num_tokens],
-                multimodal_embeddings=mm_embeds,
-                is_multimodal=is_mm_embed,
-            )
-
-            input_ids = None
-            inputs_embeds = self.inputs_embeds[:num_input_tokens]
-        else:
-            input_ids = self.input_ids[:num_input_tokens]
-            inputs_embeds = None
+        del mm_embed_inputs
+        input_ids = self.input_ids[:num_input_tokens]
+        inputs_embeds = None
 
         model_kwargs = {
             "input_ids": input_ids,
@@ -1277,57 +1245,7 @@ class SpecDecodeBaseProposer:
             if all_attn_layers[name].get_kv_cache_spec(self.vllm_config) is not None
         }
 
-        # Even if the target model is multimodal, we can also use
-        # text-only draft models
-        if self.supports_mm_inputs and not supports_multimodal_embeddings(self.model):
-            logger.warning_once(
-                "Draft model %s does not support external multimodal embeddings. "
-                "Embeddings from the target model will not be passed to the "
-                "drafter; using text-only draft inputs instead.",
-                type(self.model).__name__,
-            )
-            self.supports_mm_inputs = False
-
-        if supports_multimodal(target_model):
-            # handle multimodality
-            assert hasattr(target_model, "config")
-            if self.get_model_name(target_model) in [
-                "Cohere2VisionForConditionalGeneration",
-                "Exaone4_5_ForConditionalGeneration",
-                "GlmOcrForConditionalGeneration",
-                "HunYuanVLForConditionalGeneration",
-                "InternS2PreviewForConditionalGeneration",
-                "MiMoV2OmniForCausalLM",
-                "Qwen2_5_VLForConditionalGeneration",
-                "Qwen3_5ForConditionalGeneration",
-                "Qwen3_5MoeForConditionalGeneration",
-                "Qwen3VLForConditionalGeneration",
-                "Qwen3VLMoeForConditionalGeneration",
-                "Gemma4ForConditionalGeneration",
-                "Gemma4UnifiedForConditionalGeneration",
-                "Step3p7ForConditionalGeneration",
-            ]:
-                self.model.config.image_token_index = target_model.config.image_token_id
-            elif self.get_model_name(target_model) == "PixtralForConditionalGeneration":
-                self.model.config.image_token_index = (
-                    target_model.config.vision_config.image_token_id
-                )
-            elif self.get_model_name(target_model) in (
-                "KimiK25ForConditionalGeneration",
-                "KimiK3ForConditionalGeneration",
-            ):
-                self.model.config.image_token_index = (
-                    target_model.config.media_placeholder_token_id
-                )
-            else:
-                self.model.config.image_token_index = (
-                    target_model.config.image_token_index
-                )
-            target_language_model = cast(
-                SupportsMultiModal, target_model
-            ).get_language_model()
-        else:
-            target_language_model = target_model
+        target_language_model = target_model
 
         self._maybe_share_embeddings(target_language_model)
         self._maybe_share_lm_head(target_language_model)
@@ -1589,12 +1507,8 @@ class SpecDecodeBaseProposer:
                 cudagraph_runtime_mode=cudagraph_runtime_mode,
                 slot_mapping=slot_mapping_dict,
             ):
-                if self.supports_mm_inputs:
-                    input_ids = None
-                    inputs_embeds = self.inputs_embeds[:num_input_tokens]
-                else:
-                    input_ids = self.input_ids[:num_input_tokens]
-                    inputs_embeds = None
+                input_ids = self.input_ids[:num_input_tokens]
+                inputs_embeds = None
 
                 kwargs = dict(
                     input_ids=input_ids,

@@ -358,7 +358,7 @@ class AsyncLLM(EngineClient):
                     session_id=session_id,
                 )
             else:
-                # Raw prompts require tokenization and possibly multimodal
+                # Raw prompts require tokenization and possibly extra
                 # processing, which must not block the event loop.
                 request = await self.input_processor.process_inputs_async(
                     request_id,
@@ -724,7 +724,6 @@ class AsyncLLM(EngineClient):
                             engine_idx=outputs.engine_index,
                             scheduler_stats=outputs.scheduler_stats,
                             iteration_stats=iteration_stats,
-                            mm_cache_stats=renderer.stat_mm_cache(),
                         )
             except Exception as e:
                 logger.exception("AsyncLLM output_handler failed.")

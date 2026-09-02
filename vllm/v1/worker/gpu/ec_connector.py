@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from vllm.config import VllmConfig
-from vllm.distributed.ec_transfer import get_ec_transfer, has_ec_transfer
+from vllm.distributed.ec_transfer import get_ec_transfer
 from vllm.distributed.ec_transfer.ec_connector.base import ECConnectorBase
 from vllm.v1.outputs import (
     EMPTY_MODEL_RUNNER_OUTPUT,
@@ -17,7 +17,6 @@ from vllm.v1.outputs import (
 
 if TYPE_CHECKING:
     from vllm.v1.core.sched.output import SchedulerOutput
-    from vllm.v1.worker.gpu.mm.encoder_cache import EncoderCache
 
 
 class ECConnector:
@@ -94,15 +93,6 @@ class ActiveECConnector(ECConnector):
 NO_OP_EC_CONNECTOR = ECConnector()
 
 
-def get_ec_connector(
-    vllm_config: VllmConfig,
-    encoder_cache: "EncoderCache | None",
-) -> ECConnector:
-    if (
-        not has_ec_transfer()
-        or vllm_config.model_config.is_encoder_decoder
-        or encoder_cache is None
-    ):
-        return NO_OP_EC_CONNECTOR
-
-    return ActiveECConnector(vllm_config, encoder_cache.encoder_outputs)
+def get_ec_connector(vllm_config: VllmConfig) -> ECConnector:
+    del vllm_config
+    return NO_OP_EC_CONNECTOR

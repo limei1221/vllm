@@ -143,22 +143,6 @@ class PrefixCacheStats(BaseCacheStats):
 
 
 @dataclass
-class MultiModalCacheStats(BaseCacheStats):
-    """
-    Stores multi-modal cache hit statistics.
-    - `reset`: Whether `reset_mm_cache` was invoked.
-    - `queries`: Refers to the number of multi-modal data items
-      that were queried.
-    """
-
-    def record(self, num_queries: int, num_hits: int) -> None:
-        """Aggregate request information into the stats."""
-        self.requests += 1
-        self.queries += num_queries
-        self.hits += num_hits
-
-
-@dataclass
 class KVCacheEvictionEvent:
     """Single KV cache block eviction sample."""
 

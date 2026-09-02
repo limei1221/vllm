@@ -685,7 +685,7 @@ def compute_mm_prefix_ranges(
     mm_features: dict[str, list] | None = None,
     sliding_window: int | None = None,
 ) -> dict[int, list[tuple[int, int]]]:
-    """Compute PrefixLM bidirectional ranges for multimodal tokens.
+    """Compute PrefixLM bidirectional ranges for media tokens.
 
     Ranges exceeding sliding_window are skipped to prevent early tokens
     from attending across the entire image span.
