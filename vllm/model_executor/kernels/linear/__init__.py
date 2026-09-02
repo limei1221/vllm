@@ -4,6 +4,8 @@
 
 from typing import TypeVar
 
+import torch
+
 import vllm.envs as envs
 from vllm.logger import init_logger
 from vllm.model_executor.kernels.linear.base import (
@@ -53,6 +55,7 @@ from vllm.model_executor.kernels.linear.scaled_mm.triton import (
     TritonFp8BlockScaledMMKernel,
     TritonInt8ScaledMMLinearKernel,
 )
+from vllm.model_executor.layers.quantization.utils.quant_utils import QuantKey
 from vllm.platforms import PlatformEnum, current_platform
 
 logger = init_logger(__name__)
@@ -96,9 +99,7 @@ _POSSIBLE_FP8_BLOCK_KERNELS: dict[
     ],
 }
 
-_POSSIBLE_WFP8A16_KERNELS: dict[
-    PlatformEnum, list[type[FP8ScaledMMLinearKernel]]
-] = {
+_POSSIBLE_WFP8A16_KERNELS: dict[PlatformEnum, list[type[FP8ScaledMMLinearKernel]]] = {
     PlatformEnum.CUDA: [
         HummingFP8ScaledMMLinearKernel,
         MarlinFP8ScaledMMLinearKernel,
@@ -162,28 +163,61 @@ def choose_scaled_mm_linear_kernel(
 
 
 def init_fp8_linear_kernel(
-    config: _KernelConfigT,
+    activation_quant_key: QuantKey,
+    weight_quant_key: QuantKey,
+    input_dtype: torch.dtype,
+    out_dtype: torch.dtype,
+    weight_shape: tuple[int, int],
     compute_capability: int | None = None,
-    force_kernel: type[_KernelT] | None = None,
-) -> FP8ScaledMMLinearKernel:
-    if config.weight_type == "fp8":
-        if config.has_weight_block_scaling:
-            kernel_type = choose_scaled_mm_linear_kernel(
-                config,
-                _POSSIBLE_FP8_BLOCK_KERNELS,
-                compute_capability,
-                force_kernel,
-            )
-        else:
-            kernel_type = choose_scaled_mm_linear_kernel(
-                config,
-                _POSSIBLE_FP8_KERNELS,
-                compute_capability,
-                force_kernel,
-            )
+    force_kernel: type[FP8ScaledMMLinearKernel] | None = None,
+    module_name: str | None = None,
+) -> FP8ScaledMMLinearKernel | Fp8BlockScaledMMLinearKernel:
+    config = FP8ScaledMMLinearLayerConfig(
+        weight_quant_key=weight_quant_key,
+        activation_quant_key=activation_quant_key,
+        input_dtype=input_dtype,
+        out_dtype=out_dtype,
+        weight_shape=weight_shape,
+    )
+
+    # Per-group activation scales mean block-wise quantization, which has its
+    # own kernel set (DeepGEMM and friends). The two lists have different
+    # element types, so they are dispatched separately to stay inferable.
+    if activation_quant_key.scale.group_shape.is_per_group():
+        kernel_type = choose_scaled_mm_linear_kernel(
+            config,
+            _POSSIBLE_FP8_BLOCK_KERNELS,  # type: ignore[misc]
+            compute_capability,
+            force_kernel,
+        )
     else:
-        raise ValueError(f"Unsupported weight type: {config.weight_type}")
-    return kernel_type(config)  # type: ignore
+        kernel_type = choose_scaled_mm_linear_kernel(
+            config,
+            _POSSIBLE_FP8_KERNELS,  # type: ignore[arg-type]
+            compute_capability,
+            force_kernel,
+        )
+
+    if module_name:
+        logger.info_once(
+            "Selected %s for %s", kernel_type.__name__, module_name, scope="global"
+        )
+
+    # TODO make scaled_mm kernels inherit from MMLinearKernel. Only the
+    # FP8ScaledMMLinearKernel subclasses take layer_param_names; the block
+    # kernels are constructed from the config alone.
+    if issubclass(kernel_type, FP8ScaledMMLinearKernel):
+        return kernel_type(
+            config,
+            layer_param_names=[
+                "weight",
+                "weight_scale",
+                "input_scale",
+                "input_scale_ub",
+            ],
+        )
+
+    return kernel_type(config)
 
 
 def init_int8_linear_kernel(

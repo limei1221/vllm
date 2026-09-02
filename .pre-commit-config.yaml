@@ -175,6 +175,19 @@ repos:
     entry: python tools/pre_commit/check_boolean_context_manager.py
     language: python
     types: [python]
+  - id: lean-tree-guard
+    name: Check the lean tree for banned paths and terms
+    entry: python tools/check_lean_tree.py --tree
+    language: python
+    pass_filenames: false
+    additional_dependencies: [regex]
+  - id: mypy-lean-tree
+    name: Run mypy across the whole vllm package
+    entry: python tools/pre_commit/mypy_lean_tree.py "3.12"
+    language: python
+    pass_filenames: false
+    require_serial: true
+    additional_dependencies: ["mypy==1.20.2", regex, types-cachetools, types-setuptools, types-PyYAML, types-requests, types-torch, pydantic]
   # Rust hooks. These shell out to `cargo`; tools/pre_commit/rust-check.sh
   # skips with a warning when cargo is not installed.
   - id: rust-cargo-autoinherit

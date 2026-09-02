@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from vllm.config.pooler import SequencePoolingType, TokenPoolingType
 else:
     VllmConfig = Any
-    Pooler = Any
     SequencePoolingType = Any
     TokenPoolingType = Any
     AttnTypeStr = Any
@@ -207,7 +206,7 @@ class VllmModelForPooling(VllmModel[T_co], Protocol[T_co]):
     then the Score API uses the "token_embed" task.\n
     """
 
-    pooler: Pooler
+    pooler: Any
     """The pooler is only called on TP rank 0."""
 
 
