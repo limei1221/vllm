@@ -62,10 +62,6 @@ from vllm.model_executor.layers.fused_moe.routed_experts_capturer import (
     RoutedExpertsCapturer,
     bind_routed_experts_capturer,
 )
-from vllm.model_executor.layers.rotary_embedding import (
-    MRotaryEmbedding,
-    XDRotaryEmbedding,
-)
 from vllm.model_executor.model_loader import get_model_loader
 from vllm.model_executor.model_loader.reload import (
     finalize_layerwise_reload,
@@ -73,14 +69,10 @@ from vllm.model_executor.model_loader.reload import (
 )
 from vllm.model_executor.models.interfaces import (
     MixtureOfExperts,
-    SupportsMRoPE,
-    SupportsXDRoPE,
     get_mixture_of_experts_model,
     supports_eagle3,
-    supports_mrope,
     supports_realtime,
     supports_transcription,
-    supports_xdrope,
 )
 from vllm.model_executor.models.interfaces_base import (
     is_text_generation_model,
@@ -421,8 +413,6 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
         self.cascade_attn_enabled = not self.model_config.disable_cascade_attn
         self.is_mm_prefix_lm = self.model_config.is_mm_prefix_lm
 
-        self.uses_mrope = model_config.uses_mrope
-        self.uses_xdrope_dim = model_config.uses_xdrope_dim
         self.supports_mm_inputs = False
 
         if self.model_config.is_encoder_decoder:
@@ -645,29 +635,6 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
             self.max_num_reqs, dtype=torch.int32
         )
 
-        # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
-        if self.uses_mrope:
-            # NOTE: `mrope_positions` is implemented with one additional dummy
-            # position on purpose to make it non-contiguous so that it can work
-            # with torch compile.
-            # See detailed explanation in https://github.com/vllm-project/vllm/pull/12128#discussion_r1926431923
-
-            # NOTE: When M-RoPE is enabled, position ids are 3D regardless of
-            # the modality of inputs. For text-only inputs, each dimension has
-            # identical position IDs, making M-RoPE functionally equivalent to
-            # 1D-RoPE.
-            # See page 5 of https://arxiv.org/abs/2409.12191
-            self.mrope_positions = self._make_buffer(
-                (3, self.max_num_tokens + 1), dtype=torch.int64
-            )
-
-        # Only relevant for models using XD-RoPE (e.g, HunYuan-VL)
-        if self.uses_xdrope_dim > 0:
-            # Similar to mrope but use assigned dimension number for RoPE, 4 as default.
-            self.xdrope_positions = self._make_buffer(
-                (self.uses_xdrope_dim, self.max_num_tokens + 1), dtype=torch.int64
-            )
-
         # None in the first PP rank. The rest are set after load_model.
         self.intermediate_tensors: IntermediateTensors | None = None
 
@@ -848,16 +815,8 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
 
     def _get_positions(self, num_tokens: Any):
         if isinstance(num_tokens, int):
-            if self.uses_mrope:
-                return self.mrope_positions.gpu[:, :num_tokens]
-            if self.uses_xdrope_dim > 0:
-                return self.xdrope_positions.gpu[:, :num_tokens]
             return self.positions[:num_tokens]
         else:
-            if self.uses_mrope:
-                return self.mrope_positions.gpu[:, num_tokens]
-            if self.uses_xdrope_dim > 0:
-                return self.xdrope_positions.gpu[:, num_tokens]
             return self.positions[num_tokens]
 
     def _make_buffer(
@@ -1081,14 +1040,6 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
                     if sampling_params.prompt_logprobs == -1
                     else sampling_params.prompt_logprobs
                 )
-
-            # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
-            if self.uses_mrope:
-                self._init_mrope_positions(req_state)
-
-            # Only relevant for models using XD-RoPE (e.g, HunYuan-VL)
-            if self.uses_xdrope_dim > 0:
-                self._init_xdrope_positions(req_state)
 
             reqs_to_add.append(req_state)
         # Update the states of the running/resumed requests.
@@ -1346,53 +1297,7 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
         # `prompt_token_ids`.
         req_state.output_token_ids.clear()
 
-        if self.uses_mrope:
-            self._init_mrope_positions(req_state)
-
         return req_state
-
-    def _init_mrope_positions(self, req_state: CachedRequestState):
-        model = self.get_model()
-        assert supports_mrope(model), "M-RoPE support is not implemented."
-        mrope_model = cast(SupportsMRoPE, model)
-
-        # `prompt_embeds` is a passthrough modality (no grid_thw), models'
-        # M-RoPE code assumes per-feature grid info, so filter it out. The
-        # prompt_embeds positions are treated as text positions for M-RoPE.
-        mrope_features: list = []
-
-        if req_state.prompt_token_ids is not None:
-            input_tokens = req_state.prompt_token_ids
-        elif req_state.prompt_embeds is not None:
-            # For embeddings-only inputs, get_mrope_input_positions only
-            # needs the sequence length when mm_features is empty (which is
-            # the case here since prompt_embeds are filtered out above).
-            seq_len = req_state.prompt_embeds.shape[0]
-            input_tokens = list(range(seq_len))
-        else:
-            raise ValueError(
-                "M-RoPE requires either prompt_token_ids or prompt_embeds."
-            )
-
-        req_state.mrope_positions, req_state.mrope_position_delta = (
-            mrope_model.get_mrope_input_positions(
-                input_tokens,
-                mrope_features,
-            )
-        )
-
-    def _init_xdrope_positions(self, req_state: CachedRequestState):
-        model = self.get_model()
-        xdrope_model = cast(SupportsXDRoPE, model)
-        assert req_state.prompt_token_ids is not None, (
-            "XD-RoPE requires prompt_token_ids to be available."
-        )
-        assert supports_xdrope(model), "XD-RoPE support is not implemented."
-
-        req_state.xdrope_positions = xdrope_model.get_xdrope_input_positions(
-            req_state.prompt_token_ids,
-            [],
-        )
 
     def _get_cumsum_and_arange(
         self,
@@ -1643,16 +1548,6 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
             + self.query_pos.np[: cu_num_tokens[-1]]
         )
 
-        # Calculate M-RoPE positions.
-        # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
-        if self.uses_mrope:
-            self._calc_mrope_positions(scheduler_output)
-
-        # Calculate XD-RoPE positions.
-        # Only relevant for models using XD-RoPE (e.g, HunYuan-VL)
-        if self.uses_xdrope_dim > 0:
-            self._calc_xdrope_positions(scheduler_output)
-
         # Get token indices.
         # E.g., [0, 1, 0, 1, 2, 3, 4, 0, 1, 2]
         # -> [0, 1, M, M + 1, M + 2, M + 3, M + 4, 2 * M, 2 * M + 1, 2 * M + 2]
@@ -1847,37 +1742,6 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
             total_num_scheduled_tokens,
             cu_num_tokens,
         )
-
-        if self.uses_mrope:
-            # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
-            # Copy one row at a time. mrope_positions is allocated as
-            # [3, max_num_tokens + 1] with a dummy trailing column to keep it
-            # non-contiguous for torch.compile, so cpu[:, :N] is a strided view.
-            # copy_() cannot express a strided source as a single
-            # cudaMemcpyAsync, so it first gathers into a contiguous *pageable*
-            # temporary, and a pageable H2D ignores non_blocking=True and
-            # synchronizes the stream before the transfer starts. Each row is
-            # contiguous within the pinned allocation, so per-row copies stay on
-            # the pinned path and are genuinely asynchronous.
-            for row in range(self.mrope_positions.gpu.shape[0]):
-                self.mrope_positions.gpu[row, :total_num_scheduled_tokens].copy_(
-                    self.mrope_positions.cpu[row, :total_num_scheduled_tokens],
-                    non_blocking=True,
-                )
-        elif self.uses_xdrope_dim > 0:
-            # Only relevant for models using XD-RoPE (e.g, HunYuan-VL)
-            self.xdrope_positions.gpu[:, :total_num_scheduled_tokens].copy_(
-                self.xdrope_positions.cpu[:, :total_num_scheduled_tokens],
-                non_blocking=True,
-            )
-        if self.use_async_spec_decode and (self.uses_mrope or self.uses_xdrope_dim > 0):
-            drift = self.num_computed_tokens[req_indices_gpu].to(
-                torch.int64
-            ) - self.input_batch.num_computed_tokens_cpu_tensor[req_indices].to(
-                device=self.device, dtype=torch.int64, non_blocking=True
-            )
-            target = self.mrope_positions if self.uses_mrope else self.xdrope_positions
-            target.gpu[:, :total_num_scheduled_tokens] += drift
 
         use_spec_decode = len(scheduler_output.scheduled_spec_decode_tokens) > 0
         if not use_spec_decode:
@@ -2340,102 +2204,6 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
         )
         return common_prefix_len if use_cascade else 0
 
-    def _calc_mrope_positions(self, scheduler_output: "SchedulerOutput"):
-        mrope_pos_ptr = 0
-        for index, req_id in enumerate(self.input_batch.req_ids):
-            req = self.requests[req_id]
-            assert req.mrope_positions is not None
-
-            num_computed_tokens = self.input_batch.num_computed_tokens_cpu[index]
-            num_scheduled_tokens = scheduler_output.num_scheduled_tokens[req_id]
-            num_prompt_tokens = length_from_prompt_token_ids_or_embeds(
-                req.prompt_token_ids, req.prompt_embeds
-            )
-
-            if num_computed_tokens + num_scheduled_tokens > num_prompt_tokens:
-                prompt_part_len = max(0, num_prompt_tokens - num_computed_tokens)
-                completion_part_len = max(0, num_scheduled_tokens - prompt_part_len)
-            else:
-                prompt_part_len = num_scheduled_tokens
-                completion_part_len = 0
-
-            assert num_scheduled_tokens == prompt_part_len + completion_part_len
-
-            if prompt_part_len > 0:
-                # prompt's mrope_positions are pre-computed
-                dst_start = mrope_pos_ptr
-                dst_end = mrope_pos_ptr + prompt_part_len
-                src_start = num_computed_tokens
-                src_end = num_computed_tokens + prompt_part_len
-
-                self.mrope_positions.cpu[:, dst_start:dst_end] = req.mrope_positions[
-                    :, src_start:src_end
-                ]
-                mrope_pos_ptr += prompt_part_len
-
-            if completion_part_len > 0:
-                # compute completion's mrope_positions on-the-fly
-                dst_start = mrope_pos_ptr
-                dst_end = mrope_pos_ptr + completion_part_len
-
-                assert req.mrope_position_delta is not None
-                MRotaryEmbedding.get_next_input_positions_tensor(
-                    out=self.mrope_positions.np,
-                    out_offset=dst_start,
-                    mrope_position_delta=req.mrope_position_delta,
-                    context_len=num_computed_tokens + prompt_part_len,
-                    num_new_tokens=completion_part_len,
-                )
-
-                mrope_pos_ptr += completion_part_len
-
-    def _calc_xdrope_positions(self, scheduler_output: "SchedulerOutput"):
-        xdrope_pos_ptr = 0
-        for index, req_id in enumerate(self.input_batch.req_ids):
-            req = self.requests[req_id]
-            assert req.xdrope_positions is not None
-
-            num_computed_tokens = self.input_batch.num_computed_tokens_cpu[index]
-            num_scheduled_tokens = scheduler_output.num_scheduled_tokens[req_id]
-            num_prompt_tokens = length_from_prompt_token_ids_or_embeds(
-                req.prompt_token_ids, req.prompt_embeds
-            )
-
-            if num_computed_tokens + num_scheduled_tokens > num_prompt_tokens:
-                prompt_part_len = max(0, num_prompt_tokens - num_computed_tokens)
-                completion_part_len = max(0, num_scheduled_tokens - prompt_part_len)
-            else:
-                prompt_part_len = num_scheduled_tokens
-                completion_part_len = 0
-
-            assert num_scheduled_tokens == prompt_part_len + completion_part_len
-
-            if prompt_part_len > 0:
-                # prompt's xdrope_positions are pre-computed
-                dst_start = xdrope_pos_ptr
-                dst_end = xdrope_pos_ptr + prompt_part_len
-                src_start = num_computed_tokens
-                src_end = num_computed_tokens + prompt_part_len
-
-                self.xdrope_positions.cpu[:, dst_start:dst_end] = req.xdrope_positions[
-                    :, src_start:src_end
-                ]
-                xdrope_pos_ptr += prompt_part_len
-
-            if completion_part_len > 0:
-                # compute completion's xdrope_positions on-the-fly
-                dst_start = xdrope_pos_ptr
-                dst_end = xdrope_pos_ptr + completion_part_len
-
-                XDRotaryEmbedding.get_next_input_positions_tensor(
-                    out=self.xdrope_positions.np,
-                    out_offset=dst_start,
-                    context_len=num_computed_tokens + prompt_part_len,
-                    num_new_tokens=completion_part_len,
-                )
-
-                xdrope_pos_ptr += completion_part_len
-
     def _calc_spec_decode_metadata(
         self,
         num_draft_tokens: np.ndarray,
@@ -2720,14 +2488,9 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
             inputs_embeds = None
             model_kwargs = self._init_model_kwargs()
 
-        if self.uses_mrope:
-            positions = self.mrope_positions.gpu[:, :num_input_tokens]
-        elif self.uses_xdrope_dim > 0:
-            positions = self.xdrope_positions.gpu[:, :num_input_tokens]
-        else:
-            positions = self.positions[:num_input_tokens]
-            if num_input_tokens > num_scheduled_tokens:
-                self.positions[num_scheduled_tokens:num_input_tokens].zero_()
+        positions = self.positions[:num_input_tokens]
+        if num_input_tokens > num_scheduled_tokens:
+            self.positions[num_scheduled_tokens:num_input_tokens].zero_()
 
         if is_first_rank:
             intermediate_tensors = None
@@ -4889,12 +4652,7 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
                 input_ids = self.input_ids.gpu[:num_tokens_padded]
                 inputs_embeds = None
 
-            if self.uses_mrope:
-                positions = self.mrope_positions.gpu[:, :num_tokens_padded]
-            elif self.uses_xdrope_dim > 0:
-                positions = self.xdrope_positions.gpu[:, :num_tokens_padded]
-            else:
-                positions = self.positions[:num_tokens_padded]
+            positions = self.positions[:num_tokens_padded]
 
             if get_pp_group().is_first_rank:
                 intermediate_tensors = None
