@@ -8,8 +8,6 @@ from typing import TYPE_CHECKING
 from vllm.config.ec_manager_config import EncoderCacheManagerMetadata
 
 if TYPE_CHECKING:
-    import numpy as np
-    import numpy.typing as npt
     import torch
 
     from vllm.distributed.ec_transfer.ec_connector.base import ECConnectorMetadata
@@ -221,14 +219,6 @@ class SchedulerOutput:
     # Only used for v2 model runner.
     preempted_req_ids: set[str] | None = None
 
-    # Whether any of the scheduled requests use structured output.
-    # Set only in async scheduling case.
-    has_structured_output_requests: bool = False
-
-    # Whether the scheduled requests have all the output tokens they
-    # need to perform grammar bitmask computation.
-    pending_structured_output_tokens: bool = False
-
     # Used for adjusting acceptance rate calculation.
     num_invalid_spec_tokens: dict[str, int] | None = None
 
@@ -270,11 +260,3 @@ class SchedulerOutput:
             finished_req_ids=set(),
             free_encoder_mm_hashes=[],
         )
-
-
-@dataclass
-class GrammarOutput:
-    # ids of structured output requests.
-    structured_output_request_ids: list[str]
-    # Bitmask ordered as structured_output_request_ids.
-    grammar_bitmask: "npt.NDArray[np.int32]"

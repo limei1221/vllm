@@ -16,11 +16,10 @@ from vllm.utils.system_utils import update_environment_variables
 from vllm.v1.kv_cache_interface import KVCacheSpec
 
 if TYPE_CHECKING:
-    from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
+    from vllm.v1.core.sched.output import SchedulerOutput
     from vllm.v1.outputs import AsyncModelRunnerOutput, ModelRunnerOutput
 else:
     SchedulerOutput = object
-    GrammarOutput = object
     AsyncModelRunnerOutput = object
     ModelRunnerOutput = object
 
@@ -151,9 +150,7 @@ class WorkerBase:
         """
         raise NotImplementedError
 
-    def sample_tokens(
-        self, grammar_output: GrammarOutput
-    ) -> ModelRunnerOutput | AsyncModelRunnerOutput:
+    def sample_tokens(self) -> ModelRunnerOutput | AsyncModelRunnerOutput:
         """Should be called immediately after execute_model iff it returned None."""
         raise NotImplementedError
 

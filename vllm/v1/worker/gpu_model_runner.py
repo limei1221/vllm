@@ -190,7 +190,7 @@ from .utils import (
 )
 
 if TYPE_CHECKING:
-    from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
+    from vllm.v1.core.sched.output import SchedulerOutput
     from vllm.v1.worker.encoder_cudagraph import EncoderCudaGraphManager
 
 logger = init_logger(__name__)
@@ -3321,7 +3321,7 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
 
     @torch.inference_mode
     def sample_tokens(
-        self, grammar_output: "GrammarOutput | None"
+        self,
     ) -> ModelRunnerOutput | AsyncModelRunnerOutput | IntermediateTensors:
         if self.execute_model_state is None:
             kv_connector_output = self.kv_connector_output
@@ -3623,9 +3623,9 @@ class GPUModelRunner(KVConnectorModelRunnerMixin, ECConnectorModelRunnerMixin):
             self.prev_num_spec_tokens = self._draft_token_ids.shape[1]
         # Check if we need to copy draft tokens to CPU. In async scheduling,
         # we only copy when needed for structured output, penalties or bad_words.
-        if self.use_async_scheduling and not (
-            scheduler_output.has_structured_output_requests
-            or self.input_batch.sampling_metadata.output_token_ids
+        if (
+            self.use_async_scheduling
+            and not self.input_batch.sampling_metadata.output_token_ids
         ):
             return
         # We must also set the corresponding request ids.

@@ -17,9 +17,8 @@ from vllm.entrypoints.openai.engine.protocol import (
     StopParam,
     StreamOptions,
     UsageInfo,
-    structured_outputs_from_response_format,
+    validate_response_format_unsupported,
     validate_structural_tag_response_format,
-    validate_structured_outputs_structural_tag,
 )
 from vllm.exceptions import VLLMValidationError
 from vllm.logger import init_logger
@@ -30,7 +29,6 @@ from vllm.sampling_params import (
     RepetitionDetectionParams,
     RequestOutputKind,
     SamplingParams,
-    StructuredOutputsParams,
     ThinkingTokenBudget,
 )
 from vllm.utils import random_uuid
@@ -125,10 +123,6 @@ class CompletionRequest(OpenAIBaseModel):
             "of output. Only {'type': 'json_object'}, {'type': 'json_schema'}"
             ", {'type': 'structural_tag'}, or {'type': 'text' } is supported."
         ),
-    )
-    structured_outputs: StructuredOutputsParams | None = Field(
-        default=None,
-        description="Additional kwargs for structured outputs",
     )
     priority: int = Field(
         default=0,
@@ -303,13 +297,6 @@ class CompletionRequest(OpenAIBaseModel):
             include_stop_str_in_output=self.include_stop_str_in_output,
         )
 
-    def extract_structured_outputs(self) -> StructuredOutputsParams | None:
-        """Normalize request constraints into ``StructuredOutputsParams``."""
-        return structured_outputs_from_response_format(
-            self.structured_outputs,
-            self.response_format,
-        )
-
     def to_sampling_params(
         self,
         max_tokens: int,
@@ -391,7 +378,6 @@ class CompletionRequest(OpenAIBaseModel):
             if self.stream
             else RequestOutputKind.FINAL_ONLY,
             stream_interval=self.stream_interval,
-            structured_outputs=self.extract_structured_outputs(),
             logit_bias=self.logit_bias,
             allowed_token_ids=self.allowed_token_ids,
             bad_words=self.bad_words,
@@ -425,52 +411,10 @@ class CompletionRequest(OpenAIBaseModel):
             else getattr(response_format, "type", None)
         )
 
-        if rf_type == "json_schema":
-            json_schema = (
-                response_format.get("json_schema")
-                if isinstance(response_format, dict)
-                else getattr(response_format, "json_schema", None)
-            )
-            if json_schema is None:
-                raise VLLMValidationError(
-                    "When response_format type is 'json_schema', the "
-                    "'json_schema' field must be provided.",
-                    parameter="response_format",
-                )
-
         if rf_type == "structural_tag":
             validate_structural_tag_response_format(response_format)
 
-        return data
-
-    @model_validator(mode="before")
-    @classmethod
-    def check_structured_outputs_count(cls, data):
-        if not isinstance(data, dict):
-            return data
-        if data.get("structured_outputs", None) is None:
-            return data
-
-        structured_outputs_kwargs = data["structured_outputs"]
-        # structured_outputs may arrive as a dict (from JSON/raw kwargs) or
-        # as a StructuredOutputsParams dataclass instance.
-        is_dataclass = isinstance(structured_outputs_kwargs, StructuredOutputsParams)
-        count = sum(
-            (
-                getattr(structured_outputs_kwargs, k, None)
-                if is_dataclass
-                else structured_outputs_kwargs.get(k)
-            )
-            is not None
-            for k in ("json", "regex", "choice")
-        )
-        if count > 1:
-            raise VLLMValidationError(
-                "You can only use one kind of constraints for structured "
-                "outputs ('json', 'regex' or 'choice').",
-                parameter="structured_outputs",
-            )
-        validate_structured_outputs_structural_tag(structured_outputs_kwargs)
+        validate_response_format_unsupported(rf_type)
         return data
 
     @model_validator(mode="before")

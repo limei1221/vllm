@@ -77,7 +77,6 @@ class Request:
         self.priority = priority
         self.sampling_params = sampling_params
         self.pooling_params = pooling_params
-        self.structured_output_request = None
         self.arrival_time = arrival_time if arrival_time is not None else time.time()
 
         self.status = RequestStatus.WAITING
@@ -245,10 +244,6 @@ class Request:
             self.block_hashes.extend(self._block_hasher(self))
 
     @property
-    def use_structured_output(self) -> bool:
-        return False
-
-    @property
     def num_tokens(self) -> int:
         return len(self._all_token_ids)
 
@@ -317,7 +312,6 @@ class RequestStatus(enum.IntEnum):
     """Status of a request."""
 
     WAITING = enum.auto()
-    WAITING_FOR_STRUCTURED_OUTPUT_GRAMMAR = enum.auto()
     WAITING_FOR_REMOTE_KVS = enum.auto()
     WAITING_FOR_STREAMING_REQ = enum.auto()
     RUNNING = enum.auto()

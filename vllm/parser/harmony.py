@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -15,14 +15,10 @@ from xgrammar.structural_tag import (
     AnyTextFormat,
     ConstStringFormat,
     Format,
-    GrammarFormat,
     JSONSchemaFormat,
     OptionalFormat,
-    OrFormat,
-    RegexFormat,
     SequenceFormat,
     TagFormat,
-    TriggeredTagsFormat,
 )
 
 from vllm.entrypoints.chat_utils import make_tool_call_id
@@ -43,7 +39,6 @@ from vllm.entrypoints.openai.parser.harmony_utils import (
 from vllm.entrypoints.openai.responses.protocol import ResponsesRequest
 from vllm.logger import init_logger
 from vllm.parser.abstract_parser import DelegatingParser
-from vllm.sampling_params import StructuredOutputsParams
 
 if TYPE_CHECKING:
     from openai_harmony import Message, StreamableParser
@@ -350,7 +345,6 @@ class HarmonyParser(DelegatingParser):
     def adjust_request(
         self, request: ChatCompletionRequest | ResponsesRequest
     ) -> ChatCompletionRequest | ResponsesRequest:
-        request = _adjust_output_format(request)
         return super().adjust_request(request)
 
     @staticmethod
@@ -422,79 +416,3 @@ def _assemble_tag(
     tags.append(content)
 
     return StructuralTag(format=SequenceFormat(elements=tags))
-
-
-def _params_to_final_content(params: StructuredOutputsParams) -> Format | None:
-    """Map StructuredOutputsParams in a XGrammar Format."""
-    if params.json_object:
-        return _JSON_CONTENT
-    if params.json is not None:
-        schema = params.json
-        if isinstance(schema, str):
-            schema = json.loads(schema)
-        return JSONSchemaFormat(json_schema=schema)
-    if params.regex is not None:
-        return RegexFormat(pattern=params.regex)
-    if params.choice is not None:
-        return OrFormat(
-            elements=[ConstStringFormat(value=choice) for choice in params.choice]
-        )
-    if params.grammar is not None:
-        return GrammarFormat(grammar=params.grammar)
-    if params.structural_tag is not None:
-        s_tag = json.loads(params.structural_tag)
-        if "structures" in s_tag:
-            # LegacyStructuralTagResponseFormat
-            return TriggeredTagsFormat(
-                triggers=s_tag["triggers"],
-                tags=[
-                    TagFormat(
-                        begin=structure["begin"],
-                        content=JSONSchemaFormat(json_schema=structure["schema"]),
-                        end=structure["end"],
-                    )
-                    for structure in s_tag["structures"]
-                ],
-            )
-        # StructuralTagResponseFormat
-        return StructuralTag.model_validate(s_tag).format
-    return None
-
-
-def _adjust_output_format(
-    request: ChatCompletionRequest | ResponsesRequest,
-) -> ChatCompletionRequest | ResponsesRequest:
-    """Canonicalize request constraints into a reasoning-aware StructuralTag."""
-    params = request.extract_structured_outputs()
-    if params is None:
-        return request
-
-    final_content = _params_to_final_content(params)
-    if final_content is None:
-        return request
-
-    if isinstance(final_content, JSONSchemaFormat):
-        begin = _FINAL_BEGIN.format(constrain=" <|constrain|>json")
-    else:
-        begin = _FINAL_BEGIN.format(constrain="")
-
-    structural_tag = _assemble_tag(
-        allow_analysis=True,
-        allow_commentary=False,
-        content=TagFormat(begin=begin, content=final_content, end=_END_TAG),
-    )
-
-    request.structured_outputs = replace(
-        params,
-        json=None,
-        regex=None,
-        choice=None,
-        grammar=None,
-        json_object=None,
-        structural_tag=json.dumps(structural_tag.model_dump()),
-    )
-    if isinstance(request, ResponsesRequest):
-        request.text = None
-    else:
-        request.response_format = None
-    return request

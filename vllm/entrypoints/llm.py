@@ -16,7 +16,6 @@ from vllm.config import (
     CompilationConfig,
     PoolerConfig,
     ProfilerConfig,
-    StructuredOutputsConfig,
     is_init_field,
 )
 from vllm.config.compilation import CompilationMode
@@ -146,11 +145,6 @@ class LLM(OfflineInferenceMixin):
         hf_overrides: If a dictionary, contains arguments to be forwarded to the
             HuggingFace config. If a callable, it is called to update the
             HuggingFace config.
-        mm_processor_kwargs: Arguments to be forwarded to the model's processor
-            for multi-modal data, e.g., image processor. Overrides for the
-            multi-modal processor obtained from `AutoProcessor.from_pretrained`.
-            The available overrides depend on the model that is being run.
-            For example, for Phi-3-Vision: `{"num_crops": 4}`.
         pooler_config: Initialize non-default pooling config for the pooling model,
             e.g., `PoolerConfig(seq_pooling_type="MEAN", use_activation=False)`.
         compilation_config: Either an integer or a dictionary. If it is an
@@ -204,11 +198,7 @@ class LLM(OfflineInferenceMixin):
         disable_custom_all_reduce: bool = False,
         hf_token: bool | str | None = None,
         hf_overrides: HfOverrides | None = None,
-        mm_processor_kwargs: dict[str, Any] | None = None,
         pooler_config: PoolerConfig | None = None,
-        structured_outputs_config: dict[str, Any]
-        | StructuredOutputsConfig
-        | None = None,
         profiler_config: dict[str, Any] | ProfilerConfig | None = None,
         attention_config: dict[str, Any] | AttentionConfig | None = None,
         kv_cache_memory_bytes: int | None = None,
@@ -271,19 +261,13 @@ class LLM(OfflineInferenceMixin):
                 compilation_config, CompilationConfig
             )
 
-        structured_outputs_instance = _make_config(
-            structured_outputs_config, StructuredOutputsConfig
-        )
         profiler_config_instance = _make_config(profiler_config, ProfilerConfig)
         attention_config_instance = _make_config(attention_config, AttentionConfig)
 
         # warn about single-process data parallel usage.
         _dp_size = int(kwargs.get("data_parallel_size", 1))
         _distributed_executor_backend = kwargs.get("distributed_executor_backend")
-        if (
-            _dp_size > 1
-            and not current_platform.is_tpu()
-        ):
+        if _dp_size > 1 and not current_platform.is_tpu():
             raise ValueError(
                 f"LLM(data_parallel_size={_dp_size}) is not supported for single-"
                 "process usage and may hang. Please use "
@@ -320,9 +304,7 @@ class LLM(OfflineInferenceMixin):
             disable_custom_all_reduce=disable_custom_all_reduce,
             hf_token=hf_token,
             hf_overrides=hf_overrides,
-            mm_processor_kwargs=mm_processor_kwargs,
             pooler_config=pooler_config,
-            structured_outputs_config=structured_outputs_instance,
             profiler_config=profiler_config_instance,
             attention_config=attention_config_instance,
             compilation_config=compilation_config_instance,

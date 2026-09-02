@@ -40,7 +40,6 @@ class InputProcessor:
         self.cache_config = vllm_config.cache_config
         self.scheduler_config = vllm_config.scheduler_config
         self.speculative_config = vllm_config.speculative_config
-        self.structured_outputs_config = vllm_config.structured_outputs_config
         self.observability_config = vllm_config.observability_config
         self.use_v2_model_runner = vllm_config.use_v2_model_runner
 
@@ -87,7 +86,6 @@ class InputProcessor:
             params.verify(
                 self.model_config,
                 self.speculative_config,
-                self.structured_outputs_config,
                 self.tokenizer,
             )
 

@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from vllm.config.kv_events import KVEventsConfig
     from vllm.distributed.ec_transfer.ec_connector.base import ECConnectorBase
     from vllm.distributed.kv_transfer.kv_connector.v1 import KVConnectorBase_V1
-    from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
+    from vllm.v1.core.sched.output import SchedulerOutput
     from vllm.v1.engine import EngineCoreOutputs
     from vllm.v1.kv_cache_interface import KVCacheConfig
     from vllm.v1.metrics.stats import SchedulerStats
@@ -78,12 +78,6 @@ class SchedulerInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_grammar_bitmask(
-        self, scheduler_output: "SchedulerOutput"
-    ) -> "GrammarOutput | None":
-        raise NotImplementedError
-
-    @abstractmethod
     def update_from_output(
         self,
         scheduler_output: "SchedulerOutput",
@@ -105,8 +99,7 @@ class SchedulerInterface(ABC):
 
     @abstractmethod
     def update_draft_token_ids(self, draft_token_ids: "DraftTokenIds") -> None:
-        """Update requests with newly generated draft token ids, applying
-        structured output grammar validation if needed.
+        """Update requests with newly generated draft token ids.
 
         Args:
             draft_token_ids: The input draft token ids for each request.
@@ -117,8 +110,7 @@ class SchedulerInterface(ABC):
     def update_draft_token_ids_in_output(
         self, draft_token_ids: "DraftTokenIds", scheduler_output: "SchedulerOutput"
     ) -> None:
-        """Update scheduler output with newly generated draft token ids, applying
-        structured output grammar validation if needed.
+        """Update scheduler output with newly generated draft token ids.
 
         Args:
             draft_token_ids: The input draft token ids for each request.

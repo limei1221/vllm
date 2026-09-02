@@ -33,7 +33,6 @@ from vllm.v1.core.kv_cache_utils import KVCacheBlock
 from vllm.v1.core.sched.interface import PauseState, SchedulerInterface
 from vllm.v1.core.sched.output import (
     CachedRequestData,
-    GrammarOutput,
     NewRequestData,
     SchedulerOutput,
 )
@@ -188,10 +187,6 @@ class Scheduler(SchedulerInterface):
         # KV Connector: requests in process of async KV loading or recving
         self.finished_recving_kv_req_ids: set[str] = set()
         self.failed_recving_kv_req_ids: set[str] = set()
-
-        # Grammar compilation failures to finish as per-request errors in
-        # update_from_output.
-        self.grammar_compile_error_reqs: set[str] = set()
 
         speculative_config = vllm_config.speculative_config
         self.use_eagle = False
@@ -1319,13 +1314,6 @@ class Scheduler(SchedulerInterface):
             num_output_tokens=num_output_tokens,
         )
 
-    def get_grammar_bitmask(
-        self, scheduler_output: SchedulerOutput
-    ) -> GrammarOutput | None:
-        """Structured output is not part of this build, so there is no bitmask."""
-        del scheduler_output
-        return None
-
     def update_from_output(
         self,
         scheduler_output: SchedulerOutput,
@@ -1599,8 +1587,7 @@ class Scheduler(SchedulerInterface):
             self.waiting.remove_requests(stopped_preempted_reqs)
             self.skipped_waiting.remove_requests(stopped_preempted_reqs)
 
-        error_req_ids = set(self.grammar_compile_error_reqs)
-        self.grammar_compile_error_reqs.clear()
+        error_req_ids: set[str] = set()
         if failed_kv_load_req_ids and not self.recompute_kv_load_failures:
             error_req_ids.update(failed_kv_load_req_ids)
 
@@ -1702,7 +1689,6 @@ class Scheduler(SchedulerInterface):
     @staticmethod
     def _is_blocked_waiting_status(status: RequestStatus) -> bool:
         return status in (
-            RequestStatus.WAITING_FOR_STRUCTURED_OUTPUT_GRAMMAR,
             RequestStatus.WAITING_FOR_REMOTE_KVS,
             RequestStatus.WAITING_FOR_STREAMING_REQ,
         )

@@ -10,7 +10,7 @@ from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.tasks import SupportedTask
 from vllm.tracing import instrument
-from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
+from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.v1.outputs import DraftTokenIds, ModelRunnerOutput
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
@@ -138,20 +138,18 @@ class Executor(ABC):
         return output[0]
 
     @overload
-    def sample_tokens(
-        self, grammar_output: GrammarOutput | None, non_block: Literal[False] = False
-    ) -> ModelRunnerOutput: ...
+    def sample_tokens(self, non_block: Literal[False] = False) -> ModelRunnerOutput: ...
 
     @overload
     def sample_tokens(
-        self, grammar_output: GrammarOutput | None, non_block: Literal[True] = True
+        self, non_block: Literal[True] = True
     ) -> Future[ModelRunnerOutput]: ...
 
     def sample_tokens(
-        self, grammar_output: GrammarOutput | None, non_block: bool = False
+        self, non_block: bool = False
     ) -> ModelRunnerOutput | Future[ModelRunnerOutput]:
         output = self.collective_rpc(  # type: ignore[call-overload]
-            "sample_tokens", args=(grammar_output,), non_block=non_block
+            "sample_tokens", non_block=non_block
         )
         return output[0]
 

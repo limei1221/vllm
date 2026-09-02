@@ -28,9 +28,6 @@ class AsyncScheduler(Scheduler):
             if request.is_prefill_chunk:
                 continue
 
-            scheduler_output.pending_structured_output_tokens |= (
-                request.use_structured_output and request.num_output_placeholders > 0
-            )
             # The request will generate num_sampled_tokens_per_step new tokens
             # plus num_spec_tokens in this scheduling step. Diffusion has no AR
             # bonus token (num_sampled_tokens_per_step == 0) — only the canvas

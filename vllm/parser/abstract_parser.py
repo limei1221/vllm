@@ -30,7 +30,6 @@ from vllm.entrypoints.openai.responses.protocol import ResponsesRequest
 from vllm.logger import init_logger
 from vllm.parser.metrics import record_tool_parser_invocation
 from vllm.parser.utils import count_history_tool_calls
-from vllm.sampling_params import StructuredOutputsParams
 from vllm.tokenizers import TokenizerLike
 
 logger = init_logger(__name__)
@@ -546,21 +545,8 @@ class DelegatingParser(Parser):
         if not need_tool_calling:
             return request
 
-        structure_tag = self._tool_parser.get_structural_tag(
-            request,
-            reasoning=False,
-        )
-        if structure_tag is None:
-            return request
-
-        structural_tag = json.dumps(structure_tag.model_dump())
-        request.structured_outputs = StructuredOutputsParams(
-            structural_tag=structural_tag,
-        )
-        if isinstance(request, ResponsesRequest):
-            request.text = None
-        else:
-            request.response_format = None
+        # Constraining tool calls needs a grammar backend, which this build
+        # omits, so tool calls are parsed from unconstrained output instead.
         return request
 
     def extract_reasoning_streaming(

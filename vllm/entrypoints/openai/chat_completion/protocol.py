@@ -34,9 +34,8 @@ from vllm.entrypoints.openai.engine.protocol import (
     StreamOptions,
     ToolCall,
     UsageInfo,
-    structured_outputs_from_response_format,
+    validate_response_format_unsupported,
     validate_structural_tag_response_format,
-    validate_structured_outputs_structural_tag,
 )
 from vllm.exceptions import VLLMValidationError
 from vllm.logger import init_logger
@@ -47,7 +46,6 @@ from vllm.sampling_params import (
     RepetitionDetectionParams,
     RequestOutputKind,
     SamplingParams,
-    StructuredOutputsParams,
     ThinkingTokenBudget,
 )
 from vllm.utils import random_uuid
@@ -373,10 +371,6 @@ class ChatCompletionRequest(OpenAIBaseModel):
         default=None,
         description=("Additional kwargs to pass to the HF processor."),
     )
-    structured_outputs: StructuredOutputsParams | None = Field(
-        default=None,
-        description="Additional kwargs for structured outputs",
-    )
     priority: int = Field(
         default=0,
         ge=_INT64_MIN,
@@ -651,13 +645,6 @@ class ChatCompletionRequest(OpenAIBaseModel):
             include_stop_str_in_output=self.include_stop_str_in_output,
         )
 
-    def extract_structured_outputs(self) -> StructuredOutputsParams | None:
-        """Normalize request constraints into ``StructuredOutputsParams``."""
-        return structured_outputs_from_response_format(
-            self.structured_outputs,
-            self.response_format,
-        )
-
     def to_sampling_params(
         self,
         max_tokens: int,
@@ -738,7 +725,6 @@ class ChatCompletionRequest(OpenAIBaseModel):
                 RequestOutputKind.DELTA if self.stream else RequestOutputKind.FINAL_ONLY
             ),
             stream_interval=self.stream_interval,
-            structured_outputs=self.extract_structured_outputs(),
             logit_bias=self.logit_bias,
             bad_words=self.bad_words,
             thinking_token_budget=self.thinking_token_budget,
@@ -764,22 +750,10 @@ class ChatCompletionRequest(OpenAIBaseModel):
             else getattr(response_format, "type", None)
         )
 
-        if rf_type == "json_schema":
-            json_schema = (
-                response_format.get("json_schema")
-                if isinstance(response_format, dict)
-                else getattr(response_format, "json_schema", None)
-            )
-            if json_schema is None:
-                raise VLLMValidationError(
-                    "When response_format type is 'json_schema', the "
-                    "'json_schema' field must be provided.",
-                    parameter="response_format",
-                )
-
         if rf_type == "structural_tag":
             validate_structural_tag_response_format(response_format)
 
+        validate_response_format_unsupported(rf_type)
         return data
 
     @model_validator(mode="before")
@@ -851,49 +825,6 @@ class ChatCompletionRequest(OpenAIBaseModel):
                     parameter="top_logprobs",
                 )
 
-        return data
-
-    @model_validator(mode="before")
-    @classmethod
-    def check_structured_outputs_count(cls, data):
-        if isinstance(data, ValueError):
-            raise data
-        if not isinstance(data, dict):
-            return data
-
-        if data.get("structured_outputs", None) is None:
-            return data
-
-        structured_outputs_kwargs = data["structured_outputs"]
-        # structured_outputs may arrive as a dict (from JSON/raw kwargs) or
-        # as a StructuredOutputsParams dataclass instance.
-        is_dataclass = isinstance(structured_outputs_kwargs, StructuredOutputsParams)
-        count = sum(
-            (
-                getattr(structured_outputs_kwargs, k, None)
-                if is_dataclass
-                else structured_outputs_kwargs.get(k)
-            )
-            is not None
-            for k in ("json", "regex", "choice")
-        )
-        # you can only use one kind of constraints for structured outputs
-        if count > 1:
-            raise VLLMValidationError(
-                "You can only use one kind of constraints for structured "
-                "outputs ('json', 'regex' or 'choice').",
-            )
-        # you can only either use structured outputs or tools, not both
-        if count > 0 and data.get("tool_choice", "none") not in (
-            "none",
-            "auto",
-            "required",
-        ):
-            raise VLLMValidationError(
-                "You can only either use constraints for structured outputs "
-                "or tools, not both.",
-            )
-        validate_structured_outputs_structural_tag(structured_outputs_kwargs)
         return data
 
     @model_validator(mode="before")
@@ -1099,7 +1030,6 @@ class BatchChatCompletionRequest(OpenAIBaseModel):
     repetition_penalty: float | None = None
     length_penalty: float | None = 1.0
     early_stopping: bool = False
-    structured_outputs: StructuredOutputsParams | None = None
     request_id: str | None = None
     add_generation_prompt: bool = True
     continue_final_message: bool = False
@@ -1110,7 +1040,6 @@ class BatchChatCompletionRequest(OpenAIBaseModel):
     priority: int = Field(default=0, ge=_INT64_MIN, le=_INT64_MAX)
     cache_salt: str | None = None
     include_stop_str_in_output: bool = False
-    guided_decoding_backend: str | None = None
     echo: bool = False
     # None falls back to the server-level --return-tokens-as-token-ids default,
     # matching ChatCompletionRequest.return_tokens_as_token_ids.
@@ -1144,8 +1073,7 @@ class BatchChatCompletionRequest(OpenAIBaseModel):
             )
             if rf_type == "structural_tag":
                 validate_structural_tag_response_format(response_format)
-        if (structured_outputs := data.get("structured_outputs")) is not None:
-            validate_structured_outputs_structural_tag(structured_outputs)
+            validate_response_format_unsupported(rf_type)
         n = data.get("n", 1)
         if n is not None and n != 1:
             raise VLLMValidationError(

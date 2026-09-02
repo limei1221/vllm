@@ -5,7 +5,6 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from typing import Any
 
-import numpy as np
 import torch
 
 from vllm import PoolingParams, SamplingParams
@@ -13,7 +12,6 @@ from vllm.logger import init_logger
 from vllm.utils.math_utils import cdiv
 from vllm.v1.core.sched.output import (
     CachedRequestData,
-    GrammarOutput,
     NewRequestData,
     SchedulerOutput,
 )
@@ -75,7 +73,7 @@ def _warmup_block_counter(
 def run_mixed_prefill_decode_warmup(
     model_runner: GPUModelRunner,
     worker_execute_model: Callable[[SchedulerOutput], Any],
-    worker_sample_tokens: Callable[[GrammarOutput | None], Any],
+    worker_sample_tokens: Callable[[], Any],
     num_tokens: int,
     *,
     mixed_step_context: AbstractContextManager[object] | None = None,
@@ -183,10 +181,10 @@ def run_mixed_prefill_decode_warmup(
     model_runner.kv_connector.set_disabled(True)
     try:
         worker_execute_model(decode_prefill_output)
-        worker_sample_tokens(None)
+        worker_sample_tokens()
         with context:
             worker_execute_model(mixed_output)
-            worker_sample_tokens(None)
+            worker_sample_tokens()
         worker_execute_model(cleanup_output)
     finally:
         model_runner.kv_connector.set_disabled(False)
@@ -197,7 +195,7 @@ def run_mixed_prefill_decode_warmup(
 def warmup_kernels(
     model_runner: GPUModelRunner,
     worker_execute_model: Callable[[SchedulerOutput], Any],
-    worker_sample_tokens: Callable[[GrammarOutput | None], Any],
+    worker_sample_tokens: Callable[[], Any],
 ) -> None:
     """Run scheduler-realistic prefill and decode steps to JIT compile kernels.
 
@@ -299,20 +297,7 @@ def warmup_kernels(
     if not model_runner.is_pooling_model:
         # Warm up sampler and perform a decode step for non-pooling models.
 
-        grammar_output = None
-        if model_runner.is_last_pp_rank:
-            # Build a GrammarOutput to exercise the structured output bitmask
-            # kernel during the prefill step.
-            vocab_size = model_runner.model_config.get_vocab_size()
-            bitmask_width = (vocab_size + 31) // 32
-            grammar_bitmask = np.full(
-                (len(req_ids), bitmask_width), fill_value=-1, dtype=np.int32
-            )
-            grammar_output = GrammarOutput(
-                structured_output_request_ids=req_ids, grammar_bitmask=grammar_bitmask
-            )
-
-        worker_sample_tokens(grammar_output)
+        worker_sample_tokens()
 
         # Per-request state carried across the decode steps.
         req_computed = [prompt_len] * num_reqs
@@ -355,7 +340,7 @@ def warmup_kernels(
             decode_output.num_common_prefix_blocks = [0] * num_kv_cache_groups
 
             worker_execute_model(decode_output)
-            worker_sample_tokens(None)
+            worker_sample_tokens()
 
             for i, use_spec in zip(indices, spec_flags):
                 req_computed[i] += decode_query_len if use_spec else 1

@@ -57,7 +57,6 @@ from vllm.config import (
     ReasoningConfig,
     SchedulerConfig,
     SpeculativeConfig,
-    StructuredOutputsConfig,
     UVAOffloadConfig,
     VllmConfig,
     WeightTransferConfig,
@@ -564,11 +563,7 @@ class EngineArgs:
         SchedulerConfig.disable_hybrid_kv_cache_manager
     )
 
-    structured_outputs_config: StructuredOutputsConfig = get_field(
-        VllmConfig, "structured_outputs_config"
-    )
-    reasoning_parser: str = StructuredOutputsConfig.reasoning_parser
-    reasoning_parser_plugin: str | None = None
+    reasoning_parser: str = ReasoningConfig.reasoning_parser
 
     speculative_config: dict[str, Any] | None = None
     spec_method: str | None = None
@@ -912,20 +907,16 @@ class EngineArgs:
             **mamba_kwargs["stochastic_rounding_philox_rounds"],
         )
 
-        # Structured outputs arguments
-        structured_outputs_kwargs = get_kwargs(StructuredOutputsConfig)
-        structured_outputs_group = parser.add_argument_group(
-            title="StructuredOutputsConfig",
-            description=StructuredOutputsConfig.__doc__,
+        # Reasoning arguments
+        reasoning_kwargs = get_kwargs(ReasoningConfig)
+        reasoning_group = parser.add_argument_group(
+            title="ReasoningConfig",
+            description=ReasoningConfig.__doc__,
         )
-        structured_outputs_group.add_argument(
+        reasoning_group.add_argument(
             "--reasoning-parser",
             # Choices need to be validated after parsing to include plugins
-            **structured_outputs_kwargs["reasoning_parser"],
-        )
-        structured_outputs_group.add_argument(
-            "--reasoning-parser-plugin",
-            **structured_outputs_kwargs["reasoning_parser_plugin"],
+            **reasoning_kwargs["reasoning_parser"],
         )
 
         # Parallel arguments
@@ -1412,9 +1403,6 @@ class EngineArgs:
         vllm_group.add_argument("--kernel-config", **vllm_kwargs["kernel_config"])
         vllm_group.add_argument(
             "--additional-config", **vllm_kwargs["additional_config"]
-        )
-        vllm_group.add_argument(
-            "--structured-outputs-config", **vllm_kwargs["structured_outputs_config"]
         )
         vllm_group.add_argument("--profiler-config", **vllm_kwargs["profiler_config"])
         vllm_group.add_argument(
@@ -2059,15 +2047,6 @@ class EngineArgs:
             setattr(kernel_config.ir_op_priority, op_name, op_priority)
 
         load_config = self.create_load_config()
-
-        # Pass reasoning_parser into StructuredOutputsConfig
-        if self.reasoning_parser:
-            self.structured_outputs_config.reasoning_parser = self.reasoning_parser
-
-        if self.reasoning_parser_plugin:
-            self.structured_outputs_config.reasoning_parser_plugin = (
-                self.reasoning_parser_plugin
-            )
 
         observability_config = self.create_observability_config()
 

@@ -46,7 +46,6 @@ from .profiler import ProfilerConfig
 from .reasoning import ReasoningConfig
 from .scheduler import SchedulerConfig
 from .speculative import EagleModelTypes, NgramGPUTypes, SpeculativeConfig
-from .structured_outputs import StructuredOutputsConfig
 from .utils import SupportsHash, config, replace
 from .weight_transfer import WeightTransferConfig
 
@@ -349,8 +348,6 @@ class VllmConfig:
     """Kernel configuration."""
     speculative_config: SpeculativeConfig | None = None
     """Speculative decoding configuration."""
-    structured_outputs_config: StructuredOutputsConfig | None = None
-    """Structured outputs configuration. Unsupported in this build; always None."""
     observability_config: ObservabilityConfig = Field(
         default_factory=ObservabilityConfig
     )

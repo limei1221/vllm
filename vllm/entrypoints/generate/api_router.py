@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 
-
 if TYPE_CHECKING:
     from argparse import Namespace
 
@@ -39,7 +38,6 @@ async def init_generate_state(
     supported_tasks: tuple["SupportedTask", ...],
 ):
     from vllm.entrypoints.chat_utils import load_chat_template
-
     from vllm.entrypoints.openai.chat_completion.batch_serving import (
         OpenAIServingChatBatch,
     )
@@ -87,7 +85,7 @@ async def init_generate_state(
         enable_auto_tools=args.enable_auto_tool_choice,
         exclude_tools_when_tool_choice_none=args.exclude_tools_when_tool_choice_none,
         tool_parser=args.tool_call_parser,
-        reasoning_parser=args.structured_outputs_config.reasoning_parser,
+        reasoning_parser=args.reasoning_parser,
         enable_prompt_tokens_details=args.enable_prompt_tokens_details,
         enable_force_include_usage=args.enable_force_include_usage,
         enable_log_outputs=args.enable_log_outputs,

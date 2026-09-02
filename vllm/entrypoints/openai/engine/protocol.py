@@ -18,11 +18,9 @@ from pydantic import (
 )
 
 import vllm.envs as envs
-from vllm.config.utils import replace
 from vllm.entrypoints.chat_utils import make_tool_call_id
 from vllm.exceptions import VLLMServerError, VLLMValidationError
 from vllm.logger import init_logger
-from vllm.sampling_params import StructuredOutputsParams
 from vllm.utils import random_uuid
 from vllm.utils.import_utils import resolve_obj_by_qualname
 
@@ -186,39 +184,6 @@ AnyResponseFormat: TypeAlias = (
 )
 
 
-def structured_outputs_from_response_format(
-    structured_outputs: StructuredOutputsParams | None,
-    response_format: AnyResponseFormat | None,
-) -> StructuredOutputsParams | None:
-    """Apply ``response_format`` overrides to ``structured_outputs``."""
-    if response_format is None or response_format.type == "text":
-        return structured_outputs
-
-    overrides: dict[str, Any]
-    if response_format.type == "json_object":
-        overrides = {"json_object": True}
-    elif response_format.type == "json_schema":
-        json_schema = response_format.json_schema
-        assert json_schema is not None
-        overrides = {"json": json_schema.json_schema}
-    else:
-        assert isinstance(
-            response_format,
-            (
-                LegacyStructuralTagResponseFormat,
-                StructuralTagResponseFormat,
-            ),
-        )
-        overrides = {
-            "structural_tag": json.dumps(response_format.model_dump(by_alias=True))
-        }
-
-    if structured_outputs is None:
-        return StructuredOutputsParams(**overrides)
-
-    return replace(structured_outputs, **overrides)
-
-
 def validate_structural_tag_response_format(
     response_format: AnyStructuralTagResponseFormat | dict[str, Any],
 ) -> None:
@@ -250,6 +215,17 @@ def validate_structural_tag_response_format(
         ) from exc
 
 
+def validate_response_format_unsupported(rf_type: str | None) -> None:
+    """Reject response formats that need a grammar backend."""
+    if rf_type in (None, "text"):
+        return
+    raise VLLMValidationError(
+        f"response_format '{rf_type}' requires a grammar backend, which is "
+        "not part of this build; only 'text' is supported.",
+        parameter="response_format",
+    )
+
+
 def validate_structural_tag_payload(payload: Any, *, parameter: str) -> None:
     """Reject structural tags; this build has no grammar backend."""
     del payload
@@ -257,24 +233,6 @@ def validate_structural_tag_payload(payload: Any, *, parameter: str) -> None:
         f"Structural tags are not supported by this build ({parameter}).",
         parameter=parameter,
     )
-
-
-def validate_structured_outputs_structural_tag(
-    structured_outputs: Any,
-) -> None:
-    from vllm.sampling_params import StructuredOutputsParams
-
-    if isinstance(structured_outputs, StructuredOutputsParams):
-        structural_tag = structured_outputs.structural_tag
-    elif isinstance(structured_outputs, dict):
-        structural_tag = structured_outputs.get("structural_tag")
-    else:
-        return
-    if structural_tag is not None:
-        validate_structural_tag_payload(
-            structural_tag,
-            parameter="structured_outputs",
-        )
 
 
 class StreamOptions(OpenAIBaseModel):

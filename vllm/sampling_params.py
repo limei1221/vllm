@@ -4,7 +4,6 @@
 
 import copy
 import math
-from dataclasses import field
 from enum import Enum, IntEnum
 from functools import cached_property
 from typing import Annotated, Any
@@ -14,7 +13,7 @@ from pydantic import BeforeValidator
 from pydantic.dataclasses import dataclass
 
 import vllm.envs as envs
-from vllm.config import ModelConfig, SpeculativeConfig, StructuredOutputsConfig
+from vllm.config import ModelConfig, SpeculativeConfig
 from vllm.exceptions import VLLMValidationError
 from vllm.logger import init_logger
 from vllm.tokenizers import TokenizerLike
@@ -80,81 +79,6 @@ class SamplingType(IntEnum):
     GREEDY = 0
     RANDOM = 1
     RANDOM_SEED = 2
-
-
-# maybe make msgspec?
-@dataclass
-class StructuredOutputsParams:
-    # One of these fields will be used to build a logit processor.
-    json: str | dict | None = None
-    regex: str | None = None
-    choice: list[str] | None = None
-    grammar: str | None = None
-    json_object: bool | None = None
-    # These are other options that can be set.
-    disable_any_whitespace: bool = False
-    disable_additional_properties: bool = False
-    whitespace_pattern: str | None = None
-    structural_tag: str | None = None
-
-    _backend: str | None = field(default=None, init=False)
-    """CAUTION: Should only be set by Processor._validate_structured_output"""
-    _backend_was_auto: bool = field(default=False, init=False)
-    """CAUTION: Should only be set by Processor._validate_structured_output"""
-
-    def __post_init__(self):
-        """Validate that some fields are mutually exclusive."""
-        count = sum(
-            [
-                self.json is not None,
-                self.regex is not None,
-                self.choice is not None,
-                self.grammar is not None,
-                self.json_object is not None,
-                self.structural_tag is not None,
-            ]
-        )
-        if count > 1:
-            raise VLLMValidationError(
-                "You can only use one kind of structured outputs constraint "
-                f"but multiple are specified: {self.__dict__}"
-            )
-        if count < 1:
-            raise VLLMValidationError(
-                "You must use one kind of structured outputs constraint "
-                f"but none are specified: {self.__dict__}"
-            )
-
-    def all_constraints_none(self) -> bool:
-        """
-        Returns True if all structured-output constraint fields are None.
-        """
-        return all(
-            getattr(self, field) is None
-            for field in (
-                "json",
-                "regex",
-                "choice",
-                "grammar",
-                "json_object",
-                "structural_tag",
-            )
-        )
-
-    def all_non_structural_tag_constraints_none(self) -> bool:
-        """
-        Returns True if all structured-output constraint fields are None.
-        """
-        return all(
-            getattr(self, field) is None
-            for field in (
-                "json",
-                "regex",
-                "choice",
-                "grammar",
-                "json_object",
-            )
-        )
 
 
 @dataclass
@@ -333,7 +257,6 @@ class SamplingParams(
     _all_stop_token_ids: set[int] = msgspec.field(default_factory=set)
 
     # Fields used to construct logits processors
-    structured_outputs: StructuredOutputsParams | None = None
     """Parameters for configuring structured outputs."""
     logit_bias: dict[int, float] | None = None
     """If provided, the engine will construct a logits processor that applies
@@ -398,7 +321,6 @@ class SamplingParams(
         spaces_between_special_tokens: bool = True,
         output_kind: RequestOutputKind = RequestOutputKind.CUMULATIVE,
         stream_interval: int | None = None,
-        structured_outputs: StructuredOutputsParams | None = None,
         logit_bias: dict[int, float] | dict[str, float] | None = None,
         allowed_token_ids: list[int] | None = None,
         extra_args: dict[str, Any] | None = None,
@@ -462,7 +384,6 @@ class SamplingParams(
             spaces_between_special_tokens=spaces_between_special_tokens,
             output_kind=output_kind,
             stream_interval=stream_interval,
-            structured_outputs=structured_outputs,
             logit_bias=logit_bias,
             allowed_token_ids=allowed_token_ids,
             extra_args=extra_args,
@@ -774,7 +695,6 @@ class SamplingParams(
         self,
         model_config: ModelConfig,
         speculative_config: SpeculativeConfig | None,
-        structured_outputs_config: StructuredOutputsConfig | None,
         tokenizer: TokenizerLike | None,
     ) -> None:
         self._validate_logprobs(model_config)
@@ -783,9 +703,6 @@ class SamplingParams(
         self._validate_allowed_token_ids(tokenizer)
         self._validate_spec_decode(speculative_config)
         self._validate_diffusion(model_config)
-        self._validate_structured_outputs(
-            model_config, structured_outputs_config, tokenizer
-        )
 
     def _validate_logprobs(self, model_config: ModelConfig) -> None:
         max_logprobs = model_config.max_logprobs
@@ -933,19 +850,6 @@ class SamplingParams(
     def _validate_diffusion(self, model_config: ModelConfig) -> None:
         return
 
-    def _validate_structured_outputs(
-        self,
-        model_config: ModelConfig,
-        structured_outputs_config: StructuredOutputsConfig | None,
-        tokenizer: TokenizerLike | None,
-    ) -> None:
-        """Reject structured-output requests; this build has no grammar backend."""
-        del model_config, structured_outputs_config, tokenizer
-        if self.structured_outputs is not None:
-            raise VLLMValidationError(
-                "Structured outputs are not supported by this build."
-            )
-
     def __repr__(self) -> str:
         return (
             f"SamplingParams(n={self.n}, "
@@ -970,7 +874,6 @@ class SamplingParams(
             f"skip_special_tokens={self.skip_special_tokens}, "
             "spaces_between_special_tokens="
             f"{self.spaces_between_special_tokens}, "
-            f"structured_outputs={self.structured_outputs}, "
             f"extra_args={self.extra_args})"
         )
 
@@ -1007,7 +910,6 @@ class BeamSearchParams(
     temperature: float = 0.0
     length_penalty: float = 1.0
     include_stop_str_in_output: bool = False
-    structured_outputs: StructuredOutputsParams | None = None
 
     def __post_init__(self) -> None:
         _verify_num_sequences(self.beam_width, "beam_width")

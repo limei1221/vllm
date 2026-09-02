@@ -102,7 +102,6 @@ class InputBatch:
     cu_num_logits_np: np.ndarray
 
     # Whether any requests in batch use structured output.
-    has_structured_output_reqs: bool
 
     # [num_reqs] per-request prompt length, only populated for R-SWA.
     prompt_lens: torch.Tensor | None
@@ -201,7 +200,6 @@ class InputBatch:
             logits_indices=logits_indices,
             cu_num_logits=cu_num_logits,
             cu_num_logits_np=cu_num_logits_np,
-            has_structured_output_reqs=False,
             prompt_lens=None,
             max_query_len=max_query_len,
         )
