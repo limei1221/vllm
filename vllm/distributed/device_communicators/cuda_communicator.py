@@ -123,62 +123,12 @@ class CudaCommunicator(DeviceCommunicatorBase):
             self._log_all_reduce_backend_selection()
 
         if self.use_all2all:
-            if self.all2all_backend in ("naive", "allgather_reducescatter"):
-                from .all2all import AgRsAll2AllManager
-
-                self.all2all_manager = AgRsAll2AllManager(
-                    self.cpu_group, tcp_store_group
-                )
-            elif self.all2all_backend == "deepep_high_throughput":
-                from .all2all import DeepEPHTAll2AllManager
-
-                self.all2all_manager = DeepEPHTAll2AllManager(
-                    self.cpu_group, tcp_store_group
-                )
-            elif self.all2all_backend == "deepep_low_latency":
-                from .all2all import DeepEPLLAll2AllManager
-
-                self.all2all_manager = DeepEPLLAll2AllManager(
-                    self.cpu_group, tcp_store_group
-                )
-            elif self.all2all_backend in (
-                "mori_high_throughput",
-                "mori_low_latency",
-            ):
-                from .all2all import MoriAll2AllManager
-
-                self.all2all_manager = MoriAll2AllManager(
-                    self.cpu_group, self.all2all_backend
-                )
-            elif self.all2all_backend == "deepep_v2":
-                from .all2all import DeepEPV2All2AllManager
-
-                self.all2all_manager = DeepEPV2All2AllManager(
-                    self.cpu_group,
-                    tcp_store_group,
-                    device_group=self.device_group,
-                )
-            elif (
-                self.all2all_backend == "flashinfer_all2allv"
-                or self.all2all_backend == "flashinfer_nvlink_two_sided"
-            ):
-                if self.all2all_backend == "flashinfer_all2allv":
-                    logger.warning_once(
-                        "'flashinfer_all2allv' is deprecated and has been renamed to"
-                        "'flashinfer_nvlink_two_sided'. It will be removed in a future"
-                        "release."
-                    )
-                from .all2all import FlashInferNVLinkTwoSidedManager
-
-                self.all2all_manager = FlashInferNVLinkTwoSidedManager(
-                    self.cpu_group, tcp_store_group
-                )
-            elif self.all2all_backend == "flashinfer_nvlink_one_sided":
-                from .all2all import FlashInferNVLinkOneSidedManager
-
-                self.all2all_manager = FlashInferNVLinkOneSidedManager(self.cpu_group)
-            else:
+            if self.all2all_backend != "allgather_reducescatter":
                 raise ValueError(f"Unknown all2all backend: {self.all2all_backend}")
+
+            from .all2all import AgRsAll2AllManager
+
+            self.all2all_manager = AgRsAll2AllManager(self.cpu_group, tcp_store_group)
 
             logger.info_once(
                 "Using %s all2all manager.",

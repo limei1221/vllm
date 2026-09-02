@@ -82,10 +82,7 @@ class SharedExperts(torch.nn.Module):
         #   - we are using flashinfer with DP, since there nothing to gain
 
         # Both these comm backends have been shown to be safe for shared expert overlap.
-        _EPLB_OVERLAP_SAFE_BACKENDS = (
-            "allgather_reducescatter",
-            "flashinfer_nvlink_one_sided",
-        )
+        _EPLB_OVERLAP_SAFE_BACKENDS = ("allgather_reducescatter",)
 
         parallel_config = self._moe_config.moe_parallel_config
         if getattr(self._layer, "shard_sequence_parallel", False):
@@ -94,7 +91,7 @@ class SharedExperts(torch.nn.Module):
         return (
             parallel_config.enable_eplb
             and parallel_config.all2all_backend not in _EPLB_OVERLAP_SAFE_BACKENDS
-        ) or parallel_config.use_fi_nvl_two_sided_kernels
+        )
 
     def _determine_shared_experts_order(
         self,

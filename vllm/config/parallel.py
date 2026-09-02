@@ -33,19 +33,7 @@ DataParallelBackend = Literal["mp"]
 EPLBPolicyOption = Literal["default"]
 DCPCommBackend = Literal["ag_rs", "a2a"]
 EPLBCommunicatorBackend = Literal["torch_nccl", "torch_gloo", "pynccl"]
-All2AllBackend = Literal[
-    "naive",
-    "pplx",
-    "deepep_high_throughput",
-    "deepep_low_latency",
-    "deepep_v2",
-    "mori_high_throughput",
-    "mori_low_latency",
-    "allgather_reducescatter",
-    "flashinfer_all2allv",  # temporary alias for flashinfer_nvlink_two_sided
-    "flashinfer_nvlink_two_sided",
-    "flashinfer_nvlink_one_sided",
-]
+All2AllBackend = Literal["allgather_reducescatter"]
 
 
 @config
@@ -178,15 +166,9 @@ class ParallelConfig:
       will have experts [1, 3]. This strategy can help improve load balancing
       for grouped expert models with no redundant experts."""
     all2all_backend: All2AllBackend = "allgather_reducescatter"
-    """All2All backend for MoE expert parallel communication. Available options:
-
-    - "allgather_reducescatter": All2all based on allgather and reducescatter
-    - "deepep_high_throughput": Use deepep high-throughput kernels
-    - "deepep_low_latency": Use deepep low-latency kernels
-    - "mori_high_throughput": MoRI EP with InterNodeV1 for multi-node
-    - "mori_low_latency": MoRI EP with InterNodeV1LL for multi-node
-    - "flashinfer_nvlink_two_sided": Use flashinfer two-sided kernels for mnnvl
-    - "flashinfer_nvlink_one_sided": Use flashinfer high-throughput a2a kernels"""
+    """All2All backend for MoE expert parallel communication. The only
+    option in this build is "allgather_reducescatter", which dispatches with
+    an allgather and combines with a reducescatter."""
 
     max_parallel_loading_workers: int | None = Field(default=None, ge=1)
     """Maximum number of parallel loading workers when loading model
@@ -440,14 +422,6 @@ class ParallelConfig:
                 "The FT system assumes one AsyncMPClient manages all engines."
             )
 
-        if self.all2all_backend in ["pplx", "naive"]:
-            logger.warning(
-                "The '%s' all2all backend has been removed. "
-                "Falling back to 'allgather_reducescatter'.",
-                self.all2all_backend,
-            )
-            self.all2all_backend = "allgather_reducescatter"
-
         if self.data_parallel_size_local > self.data_parallel_size:
             raise ValueError(
                 f"data_parallel_size_local ({self.data_parallel_size_local}) "
@@ -658,15 +632,7 @@ class ParallelConfig:
     @property
     def use_sequence_parallel_moe(self) -> bool:
         return (
-            self.all2all_backend
-            in (
-                "allgather_reducescatter",
-                "deepep_high_throughput",
-                "deepep_low_latency",
-                "mori_high_throughput",
-                "mori_low_latency",
-            )
-            and self.enable_expert_parallel
+            self.enable_expert_parallel
             and self.tensor_parallel_size > 1
             and self.data_parallel_size > 1
         )
@@ -677,14 +643,6 @@ class ParallelConfig:
             self.data_parallel_size > 1
             or self.use_sequence_parallel_moe
             or (self.enable_expert_parallel and self.prefill_context_parallel_size > 1)
-        )
-
-    @property
-    def use_batched_dp_moe(self) -> bool:
-        return (
-            self.all2all_backend in ("deepep_low_latency",)
-            and self.enable_expert_parallel
-            and self.data_parallel_size > 1
         )
 
     @property

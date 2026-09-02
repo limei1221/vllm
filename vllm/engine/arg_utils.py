@@ -2326,15 +2326,10 @@ class EngineArgs:
         orig_max_num_seqs = self.max_num_seqs
 
         if self.max_num_batched_tokens is None:
-            if parallel_config.use_batched_dp_moe:
-                self.max_num_batched_tokens = (
-                    SchedulerConfig.DEFAULT_MAX_NUM_BATCHED_TOKENS_FOR_BATCHED_DP
-                )
-            else:
-                self.max_num_batched_tokens = default_max_num_batched_tokens.get(
-                    usage_context,
-                    SchedulerConfig.DEFAULT_MAX_NUM_BATCHED_TOKENS,
-                )
+            self.max_num_batched_tokens = default_max_num_batched_tokens.get(
+                usage_context,
+                SchedulerConfig.DEFAULT_MAX_NUM_BATCHED_TOKENS,
+            )
 
         if self.max_num_seqs is None:
             self.max_num_seqs = default_max_num_seqs.get(

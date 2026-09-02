@@ -1059,37 +1059,12 @@ class FusedMoEParallelConfig:
         )
 
     @property
-    def use_deepep_ht_kernels(self):
-        return (
-            self.use_all2all_kernels
-            and self.all2all_backend == "deepep_high_throughput"
-        )
-
-    @property
-    def use_deepep_ll_kernels(self):
-        return self.use_all2all_kernels and self.all2all_backend == "deepep_low_latency"
-
-    @property
-    def use_fi_nvl_two_sided_kernels(self):
-        return self.use_all2all_kernels and (
-            self.all2all_backend == "flashinfer_all2allv"
-            or self.all2all_backend == "flashinfer_nvlink_two_sided"
-        )
-
-    @property
-    def use_fi_nvl_one_sided_kernels(self):
-        return (
-            self.use_all2all_kernels
-            and self.all2all_backend == "flashinfer_nvlink_one_sided"
-        )
-
-    @property
     def use_batched_activation_format(self):
-        return self.use_deepep_ll_kernels
+        return False
 
     @property
     def needs_round_robin_routing_tables(self):
-        return self.use_deepep_ll_kernels
+        return False
 
     @property
     def use_ag_rs_all2all_kernels(self):
@@ -1097,17 +1072,6 @@ class FusedMoEParallelConfig:
             self.use_all2all_kernels
             and self.all2all_backend == "allgather_reducescatter"
         )
-
-    @property
-    def use_mori_kernels(self):
-        return self.use_all2all_kernels and self.all2all_backend in (
-            "mori_high_throughput",
-            "mori_low_latency",
-        )
-
-    @property
-    def use_deepep_v2_kernels(self):
-        return self.use_all2all_kernels and self.all2all_backend == "deepep_v2"
 
     @staticmethod
     def flatten_tp_across_dp_and_pcp(
@@ -1362,15 +1326,6 @@ class FusedMoEConfig:
                 rocm_aiter_ops.is_fusion_moe_shared_experts_enabled()
             )
 
-        if self.use_mori_kernels:
-            assert self.rocm_aiter_fmoe_enabled, (
-                "Mori needs to be used with aiter fused_moe for now."
-            )
-            assert not self.aiter_fmoe_shared_expert_enabled, (
-                "Mori does not support fusion shared expert now. "
-                "Turn it off by setting VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS=0"
-            )
-
         if not self.is_act_and_mul and not (
             current_platform.is_cuda_alike() or current_platform.is_xpu()
         ):
@@ -1444,32 +1399,8 @@ class FusedMoEConfig:
         return self.defer_moe_finalize and self.tp_size > 1
 
     @property
-    def use_deepep_ht_kernels(self):
-        return self.moe_parallel_config.use_deepep_ht_kernels
-
-    @property
-    def use_deepep_ll_kernels(self):
-        return self.moe_parallel_config.use_deepep_ll_kernels
-
-    @property
-    def use_mori_kernels(self):
-        return self.moe_parallel_config.use_mori_kernels
-
-    @property
-    def use_fi_nvl_two_sided_kernels(self):
-        return self.moe_parallel_config.use_fi_nvl_two_sided_kernels
-
-    @property
-    def use_fi_nvl_one_sided_kernels(self):
-        return self.moe_parallel_config.use_fi_nvl_one_sided_kernels
-
-    @property
     def use_ag_rs_all2all_kernels(self):
         return self.moe_parallel_config.use_ag_rs_all2all_kernels
-
-    @property
-    def use_deepep_v2_kernels(self):
-        return self.moe_parallel_config.use_deepep_v2_kernels
 
     @property
     def needs_round_robin_routing_tables(self):

@@ -940,22 +940,10 @@ class VllmConfig:
         executor_backend = self.parallel_config.distributed_executor_backend
         executor_class = Executor.get_class(self)
         executor_supports_async_sched = executor_class.supports_async_scheduling()
-        uses_rocm_deepep_ht_dbo = (
-            current_platform.is_rocm()
-            and self.parallel_config.enable_dbo
-            and self.parallel_config.all2all_backend == "deepep_high_throughput"
-        )
-
         if self.scheduler_config.async_scheduling:
             # Async scheduling explicitly enabled, hard fail any incompatibilities.
             # Currently, async scheduling only support eagle speculative
             # decoding.
-            if uses_rocm_deepep_ht_dbo:
-                raise ValueError(
-                    "Async scheduling is not compatible with ROCm DeepEP "
-                    "high-throughput DBO. Please use --no-async-scheduling or "
-                    "select a different all2all backend."
-                )
             if self.speculative_config is not None:
                 if (
                     self.speculative_config.method not in get_args(EagleModelTypes)
@@ -1016,13 +1004,6 @@ class VllmConfig:
                     "Async scheduling will be disabled because it is not supported "
                     "with the `%s` distributed executor backend. ",
                     executor_backend,
-                )
-                self.scheduler_config.async_scheduling = False
-            elif uses_rocm_deepep_ht_dbo:
-                logger.warning_once(
-                    "Async scheduling is disabled for ROCm DeepEP "
-                    "high-throughput DBO because that combination can corrupt "
-                    "DP+EP generation accuracy."
                 )
                 self.scheduler_config.async_scheduling = False
             else:
@@ -1452,17 +1433,9 @@ class VllmConfig:
             )
 
         if self.parallel_config.use_ubatching:
-            a2a_backend = self.parallel_config.all2all_backend
-            assert a2a_backend in [
-                "deepep_low_latency",
-                "deepep_high_throughput",
-            ], (
-                "Microbatching currently only supports the deepep_low_latency "
-                "and deepep_high_throughput all2all backends. "
-                f"{a2a_backend} is not supported. To fix use "
-                "--all2all-backend=deepep_low_latency or "
-                "--all2all-backend=deepep_high_throughput "
-                "and install the matching kernels."
+            raise ValueError(
+                "Microbatching requires a DeepEP all2all backend, which is not "
+                "part of this build."
             )
 
             if not self.model_config.disable_cascade_attn:

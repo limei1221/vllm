@@ -4,10 +4,8 @@
 
 from __future__ import annotations
 
-import dataclasses
 import glob
 import os
-import time
 from collections.abc import Generator, Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,7 +29,6 @@ from vllm.model_executor.model_loader.weight_utils import (
     safetensors_weights_iterator,
 )
 from vllm.tracing import instrument
-from vllm.transformers_utils.repo_utils import list_filtered_repo_files
 
 logger = init_logger(__name__)
 
@@ -213,7 +210,18 @@ class SafetensorsModelLoader(BaseModelLoader):
     def load_weights(self, model: nn.Module, model_config: ModelConfig) -> None:
         self._init_ep_weight_filter(model_config)
 
+        weights_to_load = {name for name, _ in model.named_parameters()}
         loaded_weights = model.load_weights(self.get_all_weights(model_config, model))
+
+        # Quantized checkpoints legitimately omit parameters that are
+        # materialized during processing, so only check unquantized ones.
+        if model_config.quantization is None and loaded_weights is not None:
+            weights_not_loaded = weights_to_load - loaded_weights
+            if weights_not_loaded:
+                logger.warning(
+                    "Following weights were not loaded from checkpoint: %s",
+                    weights_not_loaded,
+                )
 
         logger.info_once("Loading weights complete.")
 
