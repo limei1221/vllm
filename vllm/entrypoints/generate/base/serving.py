@@ -12,7 +12,6 @@ from pydantic import ConfigDict
 from starlette.datastructures import Headers
 
 from vllm.engine.protocol import EngineClient
-from vllm.entrypoints.generate.beam_search.online import BeamSearchOnlineMixin
 from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
 from vllm.entrypoints.openai.completion.protocol import CompletionRequest
 from vllm.entrypoints.openai.engine.protocol import (
@@ -110,7 +109,7 @@ class ServeContext(Generic[RequestT]):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
-class GenerateBaseServing(BaseServing, BeamSearchOnlineMixin):
+class GenerateBaseServing(BaseServing):
     request_id_prefix: ClassVar[str] = """
     A short string prepended to every request’s ID.
     """

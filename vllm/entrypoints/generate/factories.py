@@ -1,24 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from vllm.config import ModelConfig
 from vllm.tasks import SupportedTask
-
-if TYPE_CHECKING:
-    from vllm.entrypoints.serve.sagemaker.api_router import (
-        EndpointFn,
-        GetHandlerFn,
-        RequestType,
-    )
 
 
 def get_generate_invocation_types(
     supported_tasks: tuple["SupportedTask", ...],
     model_config: ModelConfig | None = None,
-):
+) -> list[tuple[Any, tuple[Any, Any]]]:
     # NOTE: Items defined earlier take higher priority
-    invocation_types: list[tuple[RequestType, tuple[GetHandlerFn, EndpointFn]]] = []
+    invocation_types: list[tuple[Any, tuple[Any, Any]]] = []
 
     if "generate" in supported_tasks:
         from vllm.entrypoints.openai.chat_completion.api_router import (

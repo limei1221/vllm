@@ -24,21 +24,11 @@ def register_generate_api_routers(app: FastAPI):
 
     register_chat_api_router(app)
 
-    from vllm.entrypoints.openai.responses.api_router import (
-        attach_router as register_responses_api_router,
-    )
-
-    register_responses_api_router(app)
-
     from vllm.entrypoints.openai.completion.api_router import (
         attach_router as register_completion_api_router,
     )
 
     register_completion_api_router(app)
-
-    from .generative_scoring.api_router import register_generative_scoring_api_router
-
-    register_generative_scoring_api_router(app)
 
 
 async def init_generate_state(
@@ -50,17 +40,11 @@ async def init_generate_state(
 ):
     from vllm.entrypoints.chat_utils import load_chat_template
 
-    from vllm.entrypoints.mcp.tool_server import (
-        DemoToolServer,
-        MCPToolServer,
-        ToolServer,
-    )
     from vllm.entrypoints.openai.chat_completion.batch_serving import (
         OpenAIServingChatBatch,
     )
     from vllm.entrypoints.openai.chat_completion.serving import OpenAIServingChat
     from vllm.entrypoints.openai.completion.serving import OpenAIServingCompletion
-    from vllm.entrypoints.openai.responses.serving import OpenAIServingResponses
     from vllm.entrypoints.serve.utils.fingerprint import set_default_fingerprint_mode
 
     # Applied before any serving class is constructed so that each one picks
@@ -70,15 +54,6 @@ async def init_generate_state(
         getattr(args, "fingerprint_value", None),
     )
 
-    if args.tool_server == "demo":
-        tool_server: ToolServer | None = DemoToolServer()
-        assert isinstance(tool_server, DemoToolServer)
-        await tool_server.init_and_validate()
-    elif args.tool_server:
-        tool_server = MCPToolServer()
-        await tool_server.add_tool_server(args.tool_server)
-    else:
-        tool_server = None
     resolved_chat_template = load_chat_template(args.chat_template)
 
     # Fold the dedicated ``--cohere-format`` CLI flag into the renderer's
@@ -98,27 +73,6 @@ async def init_generate_state(
     # /v1/chat/completions/render and /v1/completions/render work on both
     # generate-mode and render-only servers. Created in init_app_state.
 
-    state.openai_serving_responses = (
-        OpenAIServingResponses(
-            engine_client,
-            state.openai_serving_models,
-            state.online_renderer,
-            request_logger=request_logger,
-            chat_template=resolved_chat_template,
-            chat_template_content_format=args.chat_template_content_format,
-            return_tokens_as_token_ids=args.return_tokens_as_token_ids,
-            enable_auto_tools=args.enable_auto_tool_choice,
-            tool_parser=args.tool_call_parser,
-            tool_server=tool_server,
-            reasoning_parser=args.structured_outputs_config.reasoning_parser,
-            enable_prompt_tokens_details=args.enable_prompt_tokens_details,
-            enable_force_include_usage=args.enable_force_include_usage,
-            enable_log_outputs=args.enable_log_outputs,
-            default_chat_template_kwargs=default_chat_template_kwargs,
-        )
-        if "generate" in supported_tasks
-        else None
-    )
     _chat_kwargs = dict(
         engine_client=engine_client,
         models=state.openai_serving_models,
@@ -161,11 +115,4 @@ async def init_generate_state(
         )
         if "generate" in supported_tasks
         else None
-    )
-    from .generative_scoring.serving import ServingGenerativeScoring
-
-    state.serving_generative_scoring = ServingGenerativeScoring(
-        engine_client,
-        state.openai_serving_models,
-        request_logger=request_logger,
     )
