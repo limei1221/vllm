@@ -13,7 +13,7 @@ import vllm.envs as envs
 from vllm.compilation.caching import aot_compile_hash_factors
 
 if TYPE_CHECKING:
-    from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+    from vllm.v1.worker.gpu.model_runner import GPUModelRunner
 
 
 def flashinfer_autotune_cache_hash(runner: "GPUModelRunner") -> str:

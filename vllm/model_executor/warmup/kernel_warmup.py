@@ -26,15 +26,12 @@ from vllm.model_executor.warmup.flashinfer_sparse_mla_warmup import (
     deepseek_v4_sparse_mla_attention_warmup,
     flashinfer_sparse_mla_decode_autotune_warmup,
 )
-from vllm.model_executor.warmup.v1_block_table_warmup import (
-    warm_v1_block_table_kernels,
-)
 from vllm.platforms import current_platform
 from vllm.utils.deep_gemm import is_deep_gemm_supported
 from vllm.utils.flashinfer import has_flashinfer
 
 if TYPE_CHECKING:
-    from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+    from vllm.v1.worker.gpu.model_runner import GPUModelRunner
     from vllm.v1.worker.gpu_worker import Worker
 
 logger = init_logger(__name__)
@@ -88,16 +85,6 @@ def _warmup_ll_bf16_router_gemm(model: torch.nn.Module) -> None:
 
 
 def kernel_warmup(worker: "Worker", *, process_local_only: bool = False):
-    if not worker.use_v2_model_runner:
-        # Pooling models do not use the generation slot-mapping path.
-        if not worker.model_runner.is_pooling_model:
-            warm_v1_block_table_kernels(worker.model_runner)
-        # The KV-block zeroing kernel is driven by the scheduler's
-        # `new_block_ids_to_zero`, so no dummy run ever reaches it.
-        zeroer = getattr(worker.model_runner, "_kv_block_zeroer", None)
-        if zeroer is not None:
-            zeroer.warmup(worker.model_runner.kv_cache_config.num_blocks)
-
     compilation_config = worker.vllm_config.compilation_config
     cudagraph_capture_sizes = list(compilation_config.cudagraph_capture_sizes or [])
 

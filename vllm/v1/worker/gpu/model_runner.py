@@ -20,9 +20,10 @@ instead of embedding feature-specific logic directly.
 import functools
 import gc
 import time
+from collections.abc import Iterable
 from contextlib import nullcontext
 from copy import deepcopy
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 import numpy as np
 import torch
@@ -32,6 +33,7 @@ import vllm.envs as envs
 from vllm.compilation.counter import compilation_counter
 from vllm.config import VllmConfig
 from vllm.config.compilation import CUDAGraphMode
+from vllm.config.utils import update_config
 from vllm.distributed.parallel_state import (
     get_dcp_group,
     get_pp_group,
@@ -44,6 +46,10 @@ from vllm.model_executor.layers.fused_moe.routed_experts_capturer import (
     bind_routed_experts_capturer,
 )
 from vllm.model_executor.model_loader import get_model_loader
+from vllm.model_executor.model_loader.reload import (
+    finalize_layerwise_reload,
+    initialize_layerwise_reload,
+)
 from vllm.model_executor.offloader import (
     create_offloader,
     get_offloader,
@@ -134,6 +140,11 @@ from vllm.v1.worker.utils import (
 from vllm.v1.worker.workspace import use_workspace_lane
 
 logger = init_logger(__name__)
+
+
+def _get_parameter_for_reload(model: nn.Module, name: str) -> nn.Parameter:
+    """Resolve checkpoint names without changing the model's module tree."""
+    module_name, _, parameter_name = name.rpartition(".")
 
 
 class GPUModelRunner:
@@ -401,20 +412,106 @@ class GPUModelRunner:
             return None
         return speculator.model
 
-    def reload_weights(self, *args, **kwargs) -> None:
-        # TODO(Wentao): Use full version instead of import when fully migrated to v2
-        from vllm.v1.worker.gpu_model_runner import GPUModelRunner as GPUModelRunnerV1
+    def reload_weights(
+        self,
+        weights_iterator: Iterable[tuple[str, torch.Tensor]] | None = None,
+        weights_path: str | None = None,
+        is_checkpoint_format: bool = True,
+    ) -> None:
+        """
+        Reload weights from a weights iterator or from disk
 
-        GPUModelRunnerV1.reload_weights(self, *args, **kwargs)  # type: ignore[arg-type]
+        Args:
+            weights_iterator: weights to load into model
+            weights_path: path to load weights from if weights_iterator is not
+                provided. Use path of original model if neither is provided.
+            is_checkpoint_format: set to False if weights have already been
+                processed into kernel format (repacking, renaming, etc.)
+        """
+        # TODO(@kylesayrs): generalize to all runners and loaders
+        # argument validation
+        if weights_iterator is None and not is_checkpoint_format:
+            logger.warning(
+                "Reloading from disk means that weights will be in checkpoint format. "
+                "Please use `is_checkpoint_format=True` "
+                "to avoid weight reloading errors"
+            )
 
-    def update_config(self, *args, **kwargs) -> None:
-        # TODO(Wentao): Use full version instead of import when fully migrated to v2
-        from vllm.v1.worker.gpu_model_runner import GPUModelRunner as GPUModelRunnerV1
+        model = self.get_model()
+        weights_to_load = {name for name, _ in model.named_parameters()}
+        counter_before_reloading = time.perf_counter()
 
-        GPUModelRunnerV1.update_config(self, *args, **kwargs)  # type: ignore[arg-type]
+        # load weights from disk if none are provided
+        if weights_iterator is None:
+            model_loader = get_model_loader(self.load_config)
+            if not hasattr(model_loader, "get_all_weights"):
+                raise NotImplementedError(
+                    f"Model reloading with `{self.load_config.load_format}` format"
+                )
+
+            if weights_path is not None:
+                # The revision belongs to the model we are reloading away from,
+                # so it must not be carried over to the new path.
+                self.model_config.model = weights_path
+                self.model_config.revision = None
+            weights_iterator = model_loader.get_all_weights(self.model_config, model)
+            weights_iterator = cast(
+                Iterable[tuple[str, torch.Tensor]], weights_iterator
+            )
+
+        # begin loading weights
+        logger.info_once("Reloading weights inplace...")
+        if is_checkpoint_format:
+            # load weights from checkpoint/ original model format
+            initialize_layerwise_reload(model)
+            loaded_weights = model.load_weights(weights_iterator)
+            finalize_layerwise_reload(model, self.model_config)
+
+        else:
+            # load weights from kernel format
+            logger.warning_once(
+                "Reloading with `is_checkpoint_format=True` requires that "
+                "weights be in kernel format and already sharded",
+            )
+            loaded_weights = set()
+            for name, loaded_weight in weights_iterator:
+                param = _get_parameter_for_reload(model, name)  # TODO: buffers?
+                param.copy_(loaded_weight)
+                loaded_weights.add(name)
+
+        # logging and validation
+        counter_after_reloading = time.perf_counter()
+        diff_seconds = counter_after_reloading - counter_before_reloading
+        logger.info_once(
+            "Reloading and processing weights took %.2f seconds",
+            diff_seconds,
+        )
+        if self.model_config.quantization is None and loaded_weights is not None:
+            weights_not_loaded = weights_to_load - loaded_weights
+            if weights_not_loaded:
+                logger.warning(
+                    "Following weights were not loaded from checkpoint: %s",
+                    weights_not_loaded,
+                )
+
+        self.reset_encoder_cache()
+        self.reset_mm_cache()
+
+    def update_config(self, overrides: dict[str, Any]) -> None:
+        allowed_config_names = {"load_config", "model_config"}
+        for config_name, config_overrides in overrides.items():
+            if config_name not in allowed_config_names:
+                allowed = ", ".join(sorted(allowed_config_names))
+                raise ValueError(
+                    f"Config override '{config_name}' is not supported. "
+                    f"Supported configs: {allowed}"
+                )
+            config = getattr(self, config_name)
+            new_config = update_config(config, config_overrides)
+            setattr(self, config_name, new_config)
 
         # v2 reads config via self.vllm_config (e.g. in load_model), so keep it
-        # in sync with the attributes the v1 helper just replaced.
+        # in sync with the attributes just replaced.
         self.vllm_config.model_config = self.model_config
         self.vllm_config.load_config = self.load_config
 
@@ -510,7 +607,6 @@ class GPUModelRunner:
             attn_cg_support.min_cg_support,
             attn_cg_support.min_cg_attn_backend,
             self.decode_query_len,
-            use_v2_model_runner=True,
             tensor_parallel_size=self.parallel_config.tensor_parallel_size,
             kv_cache_config=self.kv_cache_config,
             max_num_reqs=self.max_num_reqs,

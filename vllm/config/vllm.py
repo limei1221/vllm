@@ -63,33 +63,8 @@ else:
 
 logger = init_logger(__name__)
 
-DEFAULT_V2_MODEL_RUNNER_ARCHITECTURES = frozenset(
-    {
-        "DeepseekV2ForCausalLM",
-        "DeepseekV4ForCausalLM",
-        "GraniteMoeForCausalLM",
-        "InklingForCausalLM",
-        "InklingForConditionalGeneration",
-        "KimiK3ForConditionalGeneration",
-        "LongcatFlashNgramForCausalLM",
-        "Qwen2MoeForCausalLM",
-    }
-)
-
 
 @lru_cache
-def default_v2_model_runner_architectures() -> frozenset[str]:
-    """Architectures defaulting to the V2 model runner on this platform."""
-    from vllm.platforms import current_platform
-
-    if current_platform.is_rocm():
-        # TODO(rocm): DeepSeek V4 is still faster on MRV1 on ROCm. The
-        # attention layer picks the eager cudagraph region MRV1 needs, so
-        # this is a perf default only; drop it once MRV2 catches up.
-        return DEFAULT_V2_MODEL_RUNNER_ARCHITECTURES - {"DeepseekV4ForCausalLM"}
-    return DEFAULT_V2_MODEL_RUNNER_ARCHITECTURES
-
-
 class OptimizationLevel(IntEnum):
     """Optimization level enum."""
 
@@ -523,11 +498,7 @@ class VllmConfig:
         # Async scheduling requires 2 concurrent batches to overlap.
         pp_size = self.parallel_config.pipeline_parallel_size
         if self.scheduler_config.async_scheduling:
-            if self.use_v2_model_runner:
-                return pp_size + 1
-            # V1 Model Runner does not fully support async scheduling with PP.
-            if pp_size <= 1:
-                return 2
+            return pp_size + 1
         return pp_size
 
     @property
@@ -576,103 +547,6 @@ class VllmConfig:
             # num_speculative_tokens lookahead slots.
             return self.num_speculative_tokens
         return 0
-
-    @property
-    def use_v2_model_runner(self) -> bool:
-        use_v2_model_runner = envs.VLLM_USE_V2_MODEL_RUNNER
-        if use_v2_model_runner is not None:
-            return use_v2_model_runner
-
-        # PCP runtime support is implemented only by the V2 model runner.
-        if self.parallel_config.prefill_context_parallel_size > 1:
-            return True
-
-        # DSpark is implemented only by the V2 GPU model runner, and DeepSeek-V4
-        # is not otherwise a default-V2 architecture, so force V2 for it. If V2
-        # is unsupported for the rest of the config, _validate_v2_model_runner
-        # raises rather than silently falling back to V1 (which can't run dspark).
-        if (
-            self.speculative_config is not None
-            and self.speculative_config.method == "dspark"
-        ):
-            return True
-
-        # Mixed sliding/full DFlash drafts need multiple KV groups (V2 only);
-        # force V2 as for dspark, since a hybrid target otherwise defaults to V1.
-        if self._dflash_needs_multi_kv_group():
-            return True
-
-        # The DFlash2 candidate selector exists only in the V2 speculator. On V1
-        # the same checkpoint drafts through DFlashProposer, which never calls
-        # it, so the draft degrades to DFlash1 silently. Force V2 as for dspark.
-        if self._is_dflash2_draft():
-            return True
-
-        if not self._is_default_v2_model_runner_model():
-            return False
-
-        if not HAS_TRITON:
-            logger.warning_once(
-                "Model Runner V2 requires Triton; using the V1 model runner instead."
-            )
-            return False
-
-        unsupported = self._get_v2_model_runner_unsupported_features()
-        if unsupported:
-            logger.warning_once(
-                "Model Runner V2 does not yet support %s; using the V1 model "
-                "runner instead.",
-                ", ".join(unsupported),
-            )
-            return False
-
-        return True
-
-    def _is_dflash2_draft(self) -> bool:
-        """Whether the DFlash draft is a DFlash2 one, by the architecture the
-        speculator selects on (v1/worker/gpu/spec_decode/__init__.py)."""
-        spec = self.speculative_config
-        if spec is None or spec.method != "dflash":
-            return False
-        draft_config = getattr(spec, "draft_model_config", None)
-        if draft_config is None:
-            return False
-        return "DFlash2DraftModel" in (draft_config.architectures or [])
-
-    def _dflash_needs_multi_kv_group(self) -> bool:
-        """Whether a DFlash draft mixes sliding-window and full attention."""
-        spec = self.speculative_config
-        if spec is None or spec.method != "dflash":
-            return False
-        draft_config = getattr(spec, "draft_model_config", None)
-        if draft_config is None:
-            return False
-        layer_types = getattr(draft_config.hf_config, "layer_types", None) or []
-        num_sliding = sum(lt == "sliding_attention" for lt in layer_types)
-        return 0 < num_sliding < len(layer_types)
-
-    def _is_default_v2_model_runner_model(self) -> bool:
-        model_config = self.model_config
-        if model_config is None:
-            return False
-
-        if model_config.runner_type != "generate":
-            return False
-
-        architectures = getattr(model_config, "architectures", [])
-        default_architectures = default_v2_model_runner_architectures()
-        is_default_v2_architecture = any(
-            arch in default_architectures for arch in architectures
-        )
-
-        if getattr(model_config, "is_hybrid", False) and (
-            not is_default_v2_architecture
-        ):
-            return False
-
-        if getattr(model_config, "is_attention_free", False):
-            return False
-        return is_default_v2_architecture or not model_config.is_moe
 
     @property
     def needs_dp_coordinator(self) -> bool:
@@ -864,25 +738,6 @@ class VllmConfig:
 
         apply_recursive(self, defaults)
 
-    def _maybe_override_dynamic_sd_cudagraph_mode(self) -> None:
-        speculative_config = self.speculative_config
-        if (
-            speculative_config is None
-            or not speculative_config.uses_dynamic_speculative_decoding()
-            or not self.compilation_config.cudagraph_mode.has_full_cudagraphs()
-            or self.use_v2_model_runner
-        ):
-            return
-
-        logger.warning_once(
-            "Dynamic speculative decoding changes the target verification "
-            "length at runtime. Overriding cudagraph_mode from %s to "
-            "PIECEWISE for reliability. Use VLLM_USE_V2_MODEL_RUNNER=1 "
-            "if you want to use full CUDA graphs.",
-            self.compilation_config.cudagraph_mode.name,
-        )
-        self.compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
-
     def _maybe_disable_dynamic_sd_for_data_parallel(self) -> None:
         speculative_config = self.speculative_config
         if (
@@ -977,8 +832,6 @@ class VllmConfig:
         model_config = self.model_config
         if model_config is None or not model_config.return_sampling_mask:
             return
-        if not self.use_v2_model_runner:
-            raise ValueError("sampling distribution replay requires Model Runner V2")
         if self.speculative_config is not None:
             raise ValueError(
                 "sampling distribution replay does not support speculative decoding"
@@ -1343,7 +1196,6 @@ class VllmConfig:
             )
 
         self._maybe_disable_dynamic_sd_for_data_parallel()
-        self._maybe_override_dynamic_sd_cudagraph_mode()
 
         if (
             self.compilation_config.cudagraph_mode.requires_piecewise_compilation()
@@ -1525,13 +1377,7 @@ class VllmConfig:
             )
         current_platform.check_and_update_config(self)
 
-        if self.use_v2_model_runner:
-            self._validate_v2_model_runner()
-        elif self.parallel_config.prefill_context_parallel_size > 1:
-            raise ValueError(
-                "Prefill context parallelism requires Model Runner V2. "
-                "Remove VLLM_USE_V2_MODEL_RUNNER=0."
-            )
+        self._validate_model_runner()
 
         # Re-compute compile ranges after platform-specific config updates
         # (e.g., XPU may lower max_num_batched_tokens when MLA is enabled)
@@ -2192,8 +2038,8 @@ class VllmConfig:
             f"kernel_config={self.kernel_config!r}"
         )
 
-    def _get_v2_model_runner_unsupported_features(self) -> list[str]:
-        """Collect features not yet supported by the V2 model runner."""
+    def _get_model_runner_unsupported_features(self) -> list[str]:
+        """Collect features the model runner does not support."""
         unsupported: list[str] = []
         model_config = self.model_config
         speculative_config = self.speculative_config
@@ -2285,15 +2131,15 @@ class VllmConfig:
 
         return unsupported
 
-    def _validate_v2_model_runner(self) -> None:
-        """Check for features not yet supported by the V2 model runner."""
+    def _validate_model_runner(self) -> None:
+        """Reject configurations the model runner does not support."""
         if not HAS_TRITON:
-            raise ValueError("Model Runner V2 requires Triton.")
+            raise ValueError("The model runner requires Triton.")
 
-        unsupported = self._get_v2_model_runner_unsupported_features()
+        unsupported = self._get_model_runner_unsupported_features()
         if unsupported:
             raise ValueError(
-                f"Model Runner V2 does not yet support: {', '.join(unsupported)}"
+                f"The model runner does not support: {', '.join(unsupported)}"
             )
 
     def validate_block_size(self) -> None:
