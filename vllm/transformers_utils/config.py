@@ -17,7 +17,6 @@ from packaging.version import Version
 from safetensors.torch import _TYPES as _SAFETENSORS_TO_TORCH_DTYPE
 from transformers import GenerationConfig, PretrainedConfig
 from transformers.configuration_utils import ALLOWED_LAYER_TYPES
-from transformers.models.auto.image_processing_auto import get_image_processor_config
 from transformers.models.auto.modeling_auto import (
     MODEL_MAPPING_NAMES,
 )
@@ -960,20 +959,6 @@ def maybe_register_config_serialize_by_value() -> None:
             " remove `--trust-remote-code`",
             exc_info=e,
         )
-
-
-def get_hf_image_processor_config(
-    model: str | Path,
-    hf_token: bool | str | None = None,
-    revision: str | None = None,
-    **kwargs,
-) -> dict[str, Any]:
-    # ModelScope does not provide an interface for image_processor
-    if envs.VLLM_USE_MODELSCOPE:
-        return dict()
-    return get_image_processor_config(
-        model, token=hf_token, revision=revision, **kwargs
-    )
 
 
 def get_hf_text_config(config: PretrainedConfig):

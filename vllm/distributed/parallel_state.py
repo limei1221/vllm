@@ -1328,30 +1328,6 @@ def init_model_parallel_group(
     )
 
 
-def _replace_active_groups(
-    *,
-    world: GroupCoordinator | None,
-    dp: GroupCoordinator | None,
-    ep: GroupCoordinator | None,
-    eplb: GroupCoordinator | None,
-    node_count: int | None,
-) -> None:
-    """Destroy the current DP/EP/WORLD/EPLB groups and replace them.
-
-    Destruction is collective — all ranks in the old groups must call this
-    function together.  Pass all-``None`` to tear down without replacement.
-    """
-    global _WORLD, _DP, _EP, _EPLB, _NODE_COUNT
-    for group in (_DP, _EP, _WORLD, _EPLB):
-        if group is not None:
-            group.destroy()
-    _WORLD = world
-    _DP = dp
-    _EP = ep
-    _EPLB = eplb
-    _NODE_COUNT = node_count
-
-
 _TP: GroupCoordinator | None = None
 
 
@@ -1536,12 +1512,9 @@ def init_distributed_environment(
     from vllm.config import get_current_vllm_config_or_none
 
     config = get_current_vllm_config_or_none()
-    if (
-        config is not None
-        and (
-            config.parallel_config.nnodes > 1
-            or config.parallel_config.data_parallel_size > 1
-        )
+    if config is not None and (
+        config.parallel_config.nnodes > 1
+        or config.parallel_config.data_parallel_size > 1
     ):
         parallel_config = config.parallel_config
         # adjust to take into account data parallelism

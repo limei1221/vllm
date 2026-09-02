@@ -7,7 +7,6 @@ import enum
 import hashlib
 import inspect
 import json
-import os
 import pathlib
 import textwrap
 from collections.abc import Callable, Mapping, Sequence, Set
@@ -22,7 +21,6 @@ from pydantic.fields import Field as PydanticField
 from pydantic.fields import FieldInfo
 from typing_extensions import dataclass_transform, runtime_checkable
 
-import vllm.envs as envs
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
@@ -396,32 +394,3 @@ class Range:
 
     def __repr__(self) -> str:
         return self.__str__()
-
-
-def get_from_deprecated_env_if_set(
-    env_name: str,
-    removal_version: str,
-    field_name: str | None = None,
-) -> str | None:
-    """
-    Get value from deprecated environment variable with warning.
-
-    Args:
-        env_name: Name of the deprecated environment variable
-        removal_version: Version when it will be removed
-        field_name: Name of the field to suggest as alternative
-
-    Returns:
-        The environment variable value if set, None otherwise
-    """
-    if envs.is_set(env_name):
-        value = os.environ.get(env_name)
-        alt_msg = f" Please use {field_name} instead." if field_name else ""
-        logger.warning_once(
-            "Using %s environment variable is deprecated and will be removed in %s.%s",
-            env_name,
-            removal_version,
-            alt_msg,
-        )
-        return value
-    return None

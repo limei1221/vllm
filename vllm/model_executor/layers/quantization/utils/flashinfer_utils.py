@@ -195,61 +195,6 @@ def convert_moe_weights_to_flashinfer_trtllm_block_layout(
     )
 
 
-def align_fp4_moe_weights_for_fi(
-    w13: torch.Tensor,
-    w13_scale: torch.Tensor,
-    w2: torch.Tensor,
-    w2_scale: torch.Tensor,
-    is_act_and_mul: bool,
-    min_alignment: int = 16,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
-    """Pad intermediate size so FlashInfer kernels' alignment constraints hold.
-
-    Some FlashInfer FP4 MoE kernels require the intermediate size
-    used for GEMM to be divisible by a small alignment value. When this is
-    not satisfied (e.g. with certain tensor-parallel sizes), we pad the
-    gate/up and down projection weights along the intermediate dim.
-    """
-
-    # Current local intermediate size (per partition) is the K dimension of
-    # the down projection.
-    num_experts, hidden_size, intermediate = w2.shape
-    intermediate *= 2  # because of packed FP4
-
-    padded_intermediate = round_up(intermediate, min_alignment)
-
-    if padded_intermediate == intermediate:
-        return w13, w13_scale, w2, w2_scale, intermediate
-
-    logger.info_once(
-        "Padding intermediate size from %d to %d for up/down projection weights.",
-        intermediate,
-        padded_intermediate,
-    )
-
-    up_mult = 2 if is_act_and_mul else 1
-    padded_gate_up_dim = up_mult * padded_intermediate
-
-    # Pad w13 and w2 along its intermediate dimension.
-    padded_w13 = w13.new_zeros((num_experts, padded_gate_up_dim, hidden_size // 2))
-    padded_w13[:, : w13.shape[1], :] = w13
-
-    padded_w2 = w2.new_zeros((num_experts, hidden_size, padded_intermediate // 2))
-    padded_w2[:, :, : w2.shape[2]] = w2
-
-    padded_w13_scale = w13_scale.new_zeros(
-        (num_experts, padded_gate_up_dim, hidden_size // 16)
-    )
-    padded_w13_scale[:, : w13_scale.shape[1], :] = w13_scale
-
-    padded_w2_scale = w2_scale.new_zeros(
-        (num_experts, hidden_size, padded_intermediate // 16)
-    )
-    padded_w2_scale[:, :, : w2_scale.shape[2]] = w2_scale
-
-    return padded_w13, padded_w13_scale, padded_w2, padded_w2_scale, padded_intermediate
-
-
 def align_trtllm_fp4_moe_hidden_dim_for_fi(
     w13: torch.Tensor,
     w13_scale: torch.Tensor,

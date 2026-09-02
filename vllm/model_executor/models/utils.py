@@ -825,25 +825,3 @@ def process_eagle_weight(
         model.has_own_lm_head = True
     if "embed_tokens" in name:
         model.has_own_embed_tokens = True
-
-
-def parse_diarized_timestamp(marker: str) -> float | None:
-    if (
-        not marker
-        or not marker.isascii()
-        or marker.count(".") > 1
-        or not marker.replace(".", "").isdigit()
-    ):
-        return None
-    return float(marker)
-
-
-def parse_diarized_speaker(speaker: str) -> str | None:
-    if (
-        len(speaker) < 2
-        or speaker[0] != "S"
-        or not speaker[1:].isascii()
-        or not speaker[1:].isdigit()
-    ):
-        return None
-    return speaker

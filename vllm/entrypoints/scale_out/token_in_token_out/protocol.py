@@ -14,11 +14,9 @@ from vllm.config import ModelConfig
 from vllm.entrypoints.openai.chat_completion.protocol import (
     ChatCompletionLogProbs,
     ChatCompletionRequest,
-    ChatCompletionStreamResponse,
 )
 from vllm.entrypoints.openai.completion.protocol import (
     CompletionRequest,
-    CompletionStreamResponse,
 )
 from vllm.entrypoints.openai.engine.protocol import StreamOptions, UsageInfo
 from vllm.logprobs import Logprob
@@ -29,18 +27,9 @@ from vllm.utils import random_uuid
 ####### Tokens IN <> Tokens OUT #######
 
 
-class PlaceholderRangeInfo(BaseModel):
-    """Serializable placeholder location for a single multi-modal item."""
-
-    offset: int
-    """Start index of the placeholder tokens in the prompt."""
-
-    length: int
-    """Number of placeholder tokens."""
-
-    # TODO: add ``is_embed: list[bool] | None`` once the /generate side
-    # consumes features — some models (e.g. Qwen-VL) use sparse
-    # placeholder masks that cannot be recomputed from offset+length alone.
+# TODO: add ``is_embed: list[bool] | None`` once the /generate side
+# consumes features — some models (e.g. Qwen-VL) use sparse
+# placeholder masks that cannot be recomputed from offset+length alone.
 
 
 class GenerateRequest(BaseModel):
@@ -429,27 +418,6 @@ class DerenderCompletionStreamRequest(BaseModel):
 
     completion_request: CompletionRequest | None = None
     """The original (post adjust_request) CompletionRequest from /render."""
-
-
-class DerenderChatStreamResponse(BaseModel):
-    """Response for one streaming chat derender chunk.
-
-    Pairs the derendered SSE chunk with the updated client carried state to
-    pass to the next call.
-    """
-
-    chunk: ChatCompletionStreamResponse
-    stream_state: DerenderStreamState
-
-
-class DerenderCompletionStreamResponse(BaseModel):
-    """Response for one streaming completions derender chunk.
-
-    Parallel to ``DerenderChatStreamResponse`` for the completions endpoint.
-    """
-
-    chunk: CompletionStreamResponse
-    stream_state: DerenderStreamState
 
 
 # Determines the type by checking the ``stream`` field's literal value. A body without

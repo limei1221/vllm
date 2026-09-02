@@ -45,20 +45,6 @@ def is_fp8(x: torch.dtype | torch.Tensor) -> bool:
     return x == torch.float8_e4m3fn or x == torch.float8_e4m3fnuz
 
 
-def input_to_float8(
-    x: torch.Tensor, dtype: torch.dtype | None = None
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """This function quantizes input values to float8 values "
-    "with tensor-wise quantization."""
-    dtype = current_platform.fp8_dtype() if dtype is None else dtype
-    finfo = torch.finfo(dtype)
-    min_val, max_val = x.aminmax()
-    amax = torch.maximum(min_val.abs(), max_val.abs()).clamp(min=1e-12)
-    scale = finfo.max / amax
-    x_scl_sat = (x * scale).clamp(min=finfo.min, max=finfo.max)
-    return x_scl_sat.to(dtype).contiguous(), scale.float().reciprocal()
-
-
 @triton.jit
 def _per_token_group_quant_fp8(
     # Pointers to inputs and output
@@ -1344,24 +1330,6 @@ def process_fp8_weight_tensor_strategy(
     )
 
     weight = _maybe_pad_fp8_weight(weight)
-    return weight, weight_scale, input_scale
-
-
-def process_fp8_weight_channel_strategy(
-    weight: torch.Tensor,
-    weight_scale: torch.Tensor,
-    input_scale: torch.Tensor | None = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
-    """Process weights for channel-wise quantization strategy."""
-    from vllm.model_executor.layers.quantization.utils.w8a8_utils import (
-        normalize_e4m3fn_to_e4m3fnuz,
-    )
-
-    if current_platform.is_fp8_fnuz() and weight.dtype == torch.float8_e4m3fn:
-        weight, weight_scale, input_scale = normalize_e4m3fn_to_e4m3fnuz(
-            weight=weight, weight_scale=weight_scale, input_scale=input_scale
-        )
-
     return weight, weight_scale, input_scale
 
 

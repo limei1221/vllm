@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.datastructures import State
 
 import vllm.envs as envs
-from vllm.config import ModelConfig, VllmConfig
+from vllm.config import ModelConfig
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.protocol import EngineClient
 from vllm.entrypoints.chat_utils import load_chat_template
@@ -306,91 +306,6 @@ async def init_app_state(
     state.enable_server_load_tracking = args.enable_server_load_tracking
     state.server_load_metrics = 0
 
-
-async def init_render_app_state(
-    vllm_config: VllmConfig,
-    state: State,
-    args: Namespace,
-) -> None:
-    """Initialise FastAPI app state for a CPU-only render server.
-
-    Unlike :func:`init_app_state` this function does not require an
-    :class:`~vllm.engine.protocol.EngineClient`; it bootstraps the
-    preprocessing pipeline (renderer, input_processor)
-    directly from the :class:`~vllm.config.VllmConfig`.
-    """
-    from vllm.entrypoints.chat_utils import load_chat_template
-    from vllm.entrypoints.openai.models.serving import OpenAIModelRegistry
-    from vllm.renderers import renderer_from_config
-    from vllm.renderers.online_renderer import OnlineRenderer
-
-    served_model_names = args.served_model_name or [args.model]
-    model_registry = OpenAIModelRegistry(
-        model_config=vllm_config.model_config,
-        base_model_paths=[
-            BaseModelPath(name=name, model_path=args.model)
-            for name in served_model_names
-        ],
-    )
-
-    if args.enable_log_requests:
-        request_logger = RequestLogger(max_log_len=args.max_log_len)
-    else:
-        request_logger = None
-
-    renderer = renderer_from_config(vllm_config)
-    resolved_chat_template = load_chat_template(args.chat_template)
-
-    state.online_renderer = OnlineRenderer(
-        model_config=vllm_config.model_config,
-        renderer=renderer,
-        request_logger=request_logger,
-        chat_template=resolved_chat_template,
-        chat_template_content_format=args.chat_template_content_format,
-        trust_request_chat_template=args.trust_request_chat_template,
-        enable_auto_tools=args.enable_auto_tool_choice,
-        exclude_tools_when_tool_choice_none=args.exclude_tools_when_tool_choice_none,
-        tool_parser=args.tool_call_parser,
-        reasoning_parser=args.reasoning_parser,
-        default_chat_template_kwargs=args.default_chat_template_kwargs,
-        log_error_stack=args.log_error_stack,
-    )
-    state.online_renderer.warmup()
-
-    state.online_derenderer = OnlineDerenderer(
-        model_config=vllm_config.model_config,
-        renderer=renderer,
-        request_logger=request_logger,
-        chat_template=resolved_chat_template,
-        chat_template_content_format=args.chat_template_content_format,
-        trust_request_chat_template=args.trust_request_chat_template,
-        enable_auto_tools=args.enable_auto_tool_choice,
-        exclude_tools_when_tool_choice_none=args.exclude_tools_when_tool_choice_none,
-        tool_parser=args.tool_call_parser,
-        reasoning_parser=args.reasoning_parser,
-        default_chat_template_kwargs=args.default_chat_template_kwargs,
-        log_error_stack=args.log_error_stack,
-    )
-
-    state.openai_serving_models = model_registry
-    state.serving_tokenization = ServingTokenization(
-        model_registry,
-        state.online_renderer,
-        request_logger=request_logger,
-        chat_template=resolved_chat_template,
-        chat_template_content_format=args.chat_template_content_format,
-        default_chat_template_kwargs=args.default_chat_template_kwargs,
-        trust_request_chat_template=args.trust_request_chat_template,
-    )
-
-    state.vllm_config = vllm_config
-    # Disable stats logging — there is no engine to poll.
-    state.log_stats = False
-    state.engine_client = None
-    state.args = args
-    state.enable_server_load_tracking = False
-    state.server_load_metrics = 0
-
     # No `EngineClient` exists for the render server, so plugins get `None` and
     # must handle it themselves (see `EndpointPlugin.init_state`).
 
@@ -471,51 +386,6 @@ async def build_and_serve(
     logger.info("Supported tasks: %s", supported_tasks)
     app = build_app(args, supported_tasks, model_config)
     await init_app_state(engine_client, app.state, args, supported_tasks)
-
-    logger.info("Starting vLLM server on %s", listen_address)
-
-    return await serve_http(
-        app,
-        sock=sock,
-        enable_ssl_refresh=args.enable_ssl_refresh,
-        host=args.host,
-        port=args.port,
-        log_level=args.uvicorn_log_level,
-        # NOTE: When the 'disable_uvicorn_access_log' value is True,
-        # no access log will be output.
-        access_log=not args.disable_uvicorn_access_log,
-        timeout_keep_alive=envs.VLLM_HTTP_TIMEOUT_KEEP_ALIVE,
-        ssl_keyfile=args.ssl_keyfile,
-        ssl_certfile=args.ssl_certfile,
-        ssl_ca_certs=args.ssl_ca_certs,
-        ssl_cert_reqs=args.ssl_cert_reqs,
-        ssl_ciphers=args.ssl_ciphers,
-        h11_max_incomplete_event_size=args.h11_max_incomplete_event_size,
-        h11_max_header_count=args.h11_max_header_count,
-        **uvicorn_kwargs,
-    )
-
-
-async def build_and_serve_renderer(
-    vllm_config: VllmConfig,
-    listen_address: str,
-    sock: socket.socket,
-    args: Namespace,
-    **uvicorn_kwargs,
-) -> asyncio.Task:
-    """Build FastAPI app for a CPU-only render server, initialize state, and
-    start serving.
-
-    Returns the shutdown task for the caller to await.
-    """
-
-    # Get uvicorn log config (from file or with endpoint filter)
-    log_config = get_uvicorn_log_config(args)
-    if log_config is not None:
-        uvicorn_kwargs["log_config"] = log_config
-
-    app = build_app(args, ("render",))
-    await init_render_app_state(vllm_config, app.state, args)
 
     logger.info("Starting vLLM server on %s", listen_address)
 

@@ -4,11 +4,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
-import torch
-
 from vllm.config import VllmConfig
-from vllm.distributed.ec_transfer import get_ec_transfer
-from vllm.distributed.ec_transfer.ec_connector.base import ECConnectorBase
 from vllm.v1.outputs import (
     EMPTY_MODEL_RUNNER_OUTPUT,
     ECConnectorOutput,
@@ -33,61 +29,6 @@ class ECConnector:
         scheduler_output: "SchedulerOutput",
     ) -> ModelRunnerOutput:
         return EMPTY_MODEL_RUNNER_OUTPUT
-
-
-class ActiveECConnector(ECConnector):
-    def __init__(
-        self,
-        vllm_config: VllmConfig,
-        encoder_cache: dict[str, torch.Tensor],
-    ) -> None:
-        self.encoder_cache = encoder_cache
-        self.ec_connector = get_ec_transfer()
-        assert isinstance(self.ec_connector, ECConnectorBase)
-        # Every producer offloads freshly computed encoder outputs, including
-        # an ec_both node that also reloads them.
-        self.save_new_caches = self.ec_connector.is_producer
-
-    @contextmanager
-    def maybe_get_output(
-        self, scheduler_output: "SchedulerOutput"
-    ) -> Generator[ECConnectorOutput | None, None, None]:
-        if scheduler_output.ec_connector_metadata is None:
-            yield None
-            return
-
-        output = ECConnectorOutput()
-        ec_connector = self.ec_connector
-        assert scheduler_output.ec_connector_metadata is not None
-        ec_connector.bind_connector_metadata(scheduler_output.ec_connector_metadata)
-
-        if ec_connector.is_consumer:
-            ec_connector.start_load_caches(self.encoder_cache)
-
-        cached_hashes = set(self.encoder_cache) if self.save_new_caches else None
-        try:
-            yield output
-            if cached_hashes is not None:
-                for mm_hash in self.encoder_cache.keys() - cached_hashes:
-                    ec_connector.save_caches(
-                        encoder_cache=self.encoder_cache, mm_hash=mm_hash
-                    )
-        finally:
-            output.finished_sending, output.finished_recving = (
-                ec_connector.get_finished(scheduler_output.finished_req_ids)
-            )
-            output.ec_connector_worker_meta = ec_connector.build_connector_worker_meta()
-            ec_connector.clear_connector_metadata()
-
-    def no_forward(
-        self,
-        scheduler_output: "SchedulerOutput",
-    ) -> ModelRunnerOutput:
-        # EC send/recv even if no work to do.
-        with self.maybe_get_output(scheduler_output) as ec_connector_output:
-            pass
-
-        return ModelRunnerOutput.with_ec_conn_output_only(ec_connector_output)
 
 
 NO_OP_EC_CONNECTOR = ECConnector()

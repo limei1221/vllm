@@ -773,34 +773,6 @@ def estimate_max_model_len(
         vllm_config.model_config.max_model_len = original_max_model_len
 
 
-def check_enough_kv_cache_memory(
-    vllm_config: VllmConfig,
-    kv_cache_spec: dict[str, KVCacheSpec],
-    available_memory: int,
-):
-    """
-    Checks whether `available_memory` is enough for the KV cache to hold at
-    least one request with the model's max_model_len.
-
-    Args:
-        vllm_config: The global VllmConfig
-        kv_cache_spec: The kv cache spec of each attention layer in the model
-        available_memory: Memory available for KV cache in bytes.
-
-    Raises:
-        ValueError: If there is not enough memory available for the KV cache.
-    """
-
-    # No need to check for available memory if the kv_cache_spec is empty
-    if kv_cache_spec:
-        _check_enough_kv_cache_memory(
-            available_memory,
-            lambda: max_memory_usage_bytes(vllm_config, kv_cache_spec.values()),
-            vllm_config.model_config.max_model_len,
-            lambda am: estimate_max_model_len(vllm_config, kv_cache_spec, am),
-        )
-
-
 def create_kv_cache_group_specs(
     kv_cache_spec: dict[str, KVCacheSpec], grouped_layer_names: list[list[str]]
 ) -> list[KVCacheGroupSpec]:

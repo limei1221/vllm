@@ -26,9 +26,7 @@ It supports page size = 1.
 
 # Adapted from
 # https://github.com/ModelTC/lightllm/blob/f2a54f0912293f683bf1d1695fd12c4098a5bf82/lightllm/models/llama/triton_kernel/context_flashattention_nopad.py#L1
-import torch
 
-from vllm.platforms import current_platform
 from vllm.triton_utils import tl, triton
 
 
@@ -200,14 +198,3 @@ def _fwd_kernel(
     tl.store(
         out_ptrs, acc, mask=(offs_m[:, None] < cur_batch_seq_len) & (mask_d[None, :])
     )
-
-
-def get_block_size(dtype: torch.dtype) -> int:
-    if dtype == torch.float32:
-        return 32
-    elif current_platform.is_cuda_alike() and current_platform.has_device_capability(
-        80
-    ):
-        return 128
-    else:
-        return 64

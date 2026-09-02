@@ -14,7 +14,6 @@ from vllm.v1.outputs import (
     AsyncModelRunnerOutput,
     LogprobsTensors,
     ModelRunnerOutput,
-    PoolerOutput,
     RoutedExpertsTensors,
 )
 from vllm.v1.worker.gpu.sample.output import SamplerOutput, SamplingMaskTensors
@@ -203,50 +202,6 @@ class AsyncOutput(AsyncModelRunnerOutput):
                 f"Mask: {mask.cpu().tolist()}"
             )
 
-        return self.model_runner_output
-
-
-class AsyncPoolingOutput(AsyncModelRunnerOutput):
-    def __init__(
-        self,
-        model_runner_output: ModelRunnerOutput,
-        pooler_output: PoolerOutput,
-        finished_mask: list[bool],
-        main_stream: torch.cuda.Stream,
-        copy_stream: torch.cuda.Stream,
-    ):
-        self.model_runner_output = model_runner_output
-        self.pooler_output = pooler_output
-        # Blocking (sleep) event to avoid busy-polling the CUDA driver lock.
-        self.copy_event = torch.cuda.Event(blocking=True)
-
-        with stream(copy_stream, main_stream):
-            copy_stream.wait_stream(main_stream)
-            if isinstance(self.pooler_output, torch.Tensor) and all(finished_mask):
-                self.pooler_output_cpu: PoolerOutput = self.pooler_output.to(
-                    "cpu", non_blocking=True
-                )
-            else:
-                outputs = (
-                    self.pooler_output.unbind()
-                    if isinstance(self.pooler_output, torch.Tensor)
-                    else self.pooler_output
-                )
-                self.pooler_output_cpu = [
-                    None
-                    if output is None or not is_finished
-                    else output.to("cpu", non_blocking=True)
-                    for output, is_finished in zip(outputs, finished_mask, strict=True)
-                ]
-            self.copy_event.record(copy_stream)
-
-    def get_output(self) -> ModelRunnerOutput:
-        if isinstance(self.pooler_output_cpu, torch.Tensor):
-            pooler_output = list(self.pooler_output_cpu.unbind(dim=0))
-        else:
-            pooler_output = self.pooler_output_cpu
-        self.copy_event.synchronize()
-        self.model_runner_output.pooler_output = pooler_output
         return self.model_runner_output
 
 

@@ -60,30 +60,6 @@ class VLLMNotFoundError(VLLMClientError):
     pass
 
 
-class LoRAAdapterNotFoundError(VLLMNotFoundError):
-    """Exception raised when a LoRA adapter is not found.
-
-    This exception is thrown when a requested LoRA adapter does not exist
-    in the system.
-
-    Attributes:
-        message: The error message string describing the exception
-    """
-
-    message: str
-
-    def __init__(
-        self,
-        lora_name: str,
-        lora_path: str,
-    ) -> None:
-        message = f"Loading lora {lora_name} failed: No adapter found for {lora_path}"
-        self.message = message
-
-    def __str__(self):
-        return self.message
-
-
 class VLLMUnprocessableEntityError(VLLMClientError):
     """vLLM-specific error for unprocessable entity requests.
 

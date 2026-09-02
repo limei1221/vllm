@@ -433,27 +433,6 @@ def get_vllm_port() -> int | None:
         raise ValueError(f"VLLM_PORT '{port}' must be a valid integer") from err
 
 
-def get_env_or_set_default(
-    env_name: str,
-    default_factory: Callable[[], str],
-) -> Callable[[], str]:
-    """
-    Create a lambda that returns an environment variable value if set,
-    or generates and sets a default value using the provided factory function.
-    """
-
-    def _get_or_set_default() -> str:
-        value = os.getenv(env_name)
-        if value is not None:
-            return value
-
-        default_value = default_factory()
-        os.environ[env_name] = default_value
-        return default_value
-
-    return _get_or_set_default
-
-
 # The start-* and end* here are used by the documentation generator
 # to extract the used env vars.
 

@@ -18,19 +18,6 @@ T = TypeVar("T", bound=AttentionMetadata)
 GLOBAL_TOPK_MASK_MAX_BYTES = 128 * 1024 * 1024  # 128 MiB
 
 
-def _topk_mask_shape(
-    batch_size: int,
-    max_query_len: int,
-    max_key_len: int,
-    reserve_key_starts_word: bool = False,
-) -> tuple[int, int, int]:
-    """Shape of a bit-packed top-k mask, shared by every site that builds one."""
-    tile_m = 128 if max_query_len <= 128 else 256
-    padded_q_len = triton.cdiv(max_query_len, tile_m) * tile_m
-    num_words = triton.cdiv(max_key_len, 32) + int(reserve_key_starts_word)
-    return batch_size, padded_q_len, num_words
-
-
 @triton.jit
 def _scatter_topk_kernel(
     mask_ptr,

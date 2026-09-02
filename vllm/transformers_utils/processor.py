@@ -23,7 +23,6 @@ from typing_extensions import TypeVar
 from vllm.logger import init_logger
 from vllm.transformers_utils.repo_utils import get_hf_file_to_dict
 from vllm.transformers_utils.utils import convert_model_repo_to_path
-from vllm.utils.func_utils import get_allowed_kwarg_only_overrides
 
 logger = init_logger(__name__)
 
@@ -80,17 +79,6 @@ _I = TypeVar("_I", bound=BaseImageProcessor, default=BaseImageProcessor)
 _V = TypeVar("_V", bound=BaseVideoProcessor, default=BaseVideoProcessor)
 
 
-class HashableDict(dict):
-    """
-    A dictionary that can be hashed by lru_cache.
-    """
-
-    # NOTE: pythonic dict is not hashable,
-    # we override on it directly for simplicity
-    def __hash__(self) -> int:  # type: ignore[override]
-        return hash(frozenset(self.items()))
-
-
 class HashableList(list):
     """
     A list that can be hashed by lru_cache.
@@ -107,33 +95,6 @@ def _get_processor_factory_fn(processor_cls: type | tuple[type, ...]):
         return processor_cls.from_pretrained
 
     return processor_cls
-
-
-def _merge_mm_kwargs(
-    model_config: "ModelConfig",
-    processor_cls: type | tuple[type, ...],
-    /,
-    **kwargs,
-):
-    merged_kwargs = kwargs
-
-    factory = _get_processor_factory_fn(processor_cls)
-    allowed_kwargs = get_allowed_kwarg_only_overrides(
-        factory,
-        merged_kwargs,
-        requires_kw_only=False,
-        allow_var_kwargs=True,
-    )
-    # NOTE: Pythonic dict is not hashable and will raise unhashable type
-    # error when calling `cached_get_processor`, therefore we need to
-    # wrap it to a hashable dict.
-    for key, value in allowed_kwargs.items():
-        if isinstance(value, dict):
-            allowed_kwargs[key] = HashableDict(value)
-        if isinstance(value, list):
-            allowed_kwargs[key] = HashableList(value)
-
-    return allowed_kwargs
 
 
 def get_processor_config(
@@ -336,42 +297,6 @@ def get_processor_kwargs_keys(
         logger.exception("Failed to collect processor kwargs")
 
     return dynamic_kwargs | modality_kwargs
-
-
-def cached_get_processor_without_dynamic_kwargs(
-    processor_name: str,
-    *args: Any,
-    revision: str | None = None,
-    trust_remote_code: bool = False,
-    processor_cls: type[_P] | tuple[type[_P], ...] = ProcessorMixin,
-    **kwargs: Any,
-) -> _P:
-    # Step 1: use default kwargs to get a temporary processor instance
-    processor = cached_get_processor(
-        processor_name,
-        revision=revision,
-        trust_remote_code=trust_remote_code,
-        processor_cls=processor_cls,  # type: ignore[arg-type]
-    )
-
-    # Step 2: use temporary processor collect dynamic keys
-    dynamic_keys = get_processor_kwargs_keys(
-        get_processor_kwargs_type(processor)  # type: ignore[arg-type]
-    )
-
-    # Step 3: use dynamic_keys filter kwargs
-    filtered_kwargs = {k: v for k, v in kwargs.items() if k not in dynamic_keys}
-
-    # Step 4: use filtered kwargs to get final processor instance
-    final_processor = cached_get_processor(
-        processor_name,
-        revision=revision,
-        trust_remote_code=trust_remote_code,
-        processor_cls=processor_cls,  # type: ignore[arg-type]
-        **filtered_kwargs,
-    )
-
-    return final_processor
 
 
 def get_feature_extractor(

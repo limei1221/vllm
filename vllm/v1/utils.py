@@ -374,46 +374,6 @@ class _SubprocessWrapper:
                 self._sentinel_send.close()
 
 
-def _shutdown_subprocesses(
-    procs: list[_SubprocessWrapper], timeout: float | None = None
-) -> None:
-    """Shutdown subprocess wrappers (mirrors the shutdown() function)."""
-    if timeout is None:
-        timeout = 0.0
-    timeout = max(timeout, 5.0)
-
-    logger.debug(
-        "[shutdown] Subprocess manager: start process_count=%d timeout=%ss",
-        len(procs),
-        timeout,
-    )
-
-    for proc in procs:
-        if proc.is_alive():
-            proc.terminate()
-
-    deadline = time.monotonic() + timeout
-    for proc in procs:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        if proc.is_alive():
-            proc.join(remaining)
-
-    remaining_pids = [
-        proc.pid for proc in procs if proc.is_alive() and proc.pid is not None
-    ]
-    if remaining_pids:
-        logger.warning(
-            "[shutdown] Subprocess manager: force killing remaining processes count=%d",
-            len(remaining_pids),
-        )
-    for pid in remaining_pids:
-        kill_process_tree(pid)
-
-    logger.debug_once("[shutdown] Subprocess manager: complete")
-
-
 def run_api_server_worker_proc(
     listen_address, sock, args, client_config=None, **uvicorn_kwargs
 ) -> None:
@@ -558,20 +518,6 @@ def shutdown(procs: list[BaseProcess], timeout: float | None = None) -> None:
         kill_process_tree(pid)
 
     logger.debug_once("[shutdown] Process manager: complete")
-
-
-def copy_slice(
-    from_tensor: torch.Tensor, to_tensor: torch.Tensor, length: int
-) -> torch.Tensor:
-    """
-    Copy the first length elements of a tensor into another tensor in a
-    non-blocking manner.
-
-    Used to copy pinned CPU tensor data to pre-allocated GPU tensors.
-
-    Returns the sliced target tensor.
-    """
-    return to_tensor[:length].copy_(from_tensor[:length], non_blocking=True)
 
 
 def report_usage_stats(

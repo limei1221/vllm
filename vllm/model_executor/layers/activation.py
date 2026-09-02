@@ -818,22 +818,6 @@ def _get_gelu_pytorch_tanh() -> nn.Module:
     return nn.GELU(approximate="tanh")
 
 
-def get_act_fn(act_fn_name: str) -> nn.Module:
-    """Get an activation function by name."""
-    act_fn_name = act_fn_name.lower()
-
-    if act_fn_name.startswith("torch.nn.modules."):
-        activation_name = act_fn_name.split(".")[-1]
-        if activation_name == "identity":
-            return nn.Identity()
-        act_fn_name = activation_name
-
-    if act_fn_name not in _ACTIVATION_REGISTRY:
-        raise ValueError(f"Activation function {act_fn_name!r} is not supported.")
-
-    return _ACTIVATION_REGISTRY[act_fn_name]
-
-
 _ACTIVATION_AND_MUL_REGISTRY: LazyDict[nn.Module] = LazyDict(
     {
         "gelu": lambda: GeluAndMul(),
@@ -844,18 +828,3 @@ _ACTIVATION_AND_MUL_REGISTRY: LazyDict[nn.Module] = LazyDict(
         "swigluoai": lambda: SwigluOAIAndMul(),
     }
 )
-
-
-def get_act_and_mul_fn(act_fn_name: str, *, compile_native: bool = True) -> nn.Module:
-    """Get an activation-and-mul (i.e. SiluAndMul) function by name."""
-    act_fn_name = act_fn_name.lower()
-
-    if not compile_native and act_fn_name in ("silu", "swish"):
-        return SiluAndMul(compile_native=False)
-
-    try:
-        return _ACTIVATION_AND_MUL_REGISTRY[act_fn_name]
-    except KeyError:
-        raise ValueError(
-            f"Activation function {act_fn_name!r} is not supported."
-        ) from None

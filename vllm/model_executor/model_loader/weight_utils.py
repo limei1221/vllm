@@ -12,7 +12,6 @@ import os
 import tempfile
 import threading
 import time
-from collections import defaultdict
 from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager
 from pathlib import Path
@@ -181,17 +180,6 @@ def maybe_download_from_modelscope(
                 model_path = model
         return model_path
     return None
-
-
-def _shared_pointers(tensors):
-    ptrs = defaultdict(list)
-    for k, v in tensors.items():
-        ptrs[v.data_ptr()].append(k)
-    failing = []
-    for _, names in ptrs.items():
-        if len(names) > 1:
-            failing.append(names)
-    return failing
 
 
 # TODO(woosuk): Move this to other place.

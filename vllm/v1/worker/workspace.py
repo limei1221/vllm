@@ -293,17 +293,6 @@ def lock_workspace() -> None:
     current_workspace_manager().lock()
 
 
-def unlock_workspace() -> None:
-    """Unlock the workspace to allow growth.
-
-    This is used during elastic EP scaling when the workspace size
-    needs to grow due to changes in the number of experts.
-    After scaling operations complete, lock_workspace() should be
-    called again to prevent unexpected allocations.
-    """
-    current_workspace_manager().unlock()
-
-
 def reset_workspace_manager() -> None:
     """Reset the workspace manager to uninitialized state.
 

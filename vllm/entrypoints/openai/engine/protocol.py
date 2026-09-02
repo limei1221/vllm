@@ -8,7 +8,6 @@ import time
 from http import HTTPStatus
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
-import regex as re
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -22,7 +21,6 @@ from vllm.entrypoints.chat_utils import make_tool_call_id
 from vllm.exceptions import VLLMServerError, VLLMValidationError
 from vllm.logger import init_logger
 from vllm.utils import random_uuid
-from vllm.utils.import_utils import resolve_obj_by_qualname
 
 logger = init_logger(__name__)
 
@@ -264,40 +262,6 @@ class LogitsProcessorConstructor(BaseModel):
 
 
 LogitsProcessors = list[str | LogitsProcessorConstructor]
-
-
-def get_logits_processors(
-    processors: LogitsProcessors | None, pattern: str | None
-) -> list[Any] | None:
-    if processors and pattern:
-        logits_processors = []
-        for processor in processors:
-            qualname = processor if isinstance(processor, str) else processor.qualname
-            if not re.match(pattern, qualname):
-                raise ValueError(
-                    f"Logits processor '{qualname}' is not allowed by this "
-                    "server. See --logits-processor-pattern engine argument "
-                    "for more information."
-                )
-            try:
-                logits_processor = resolve_obj_by_qualname(qualname)
-            except Exception as e:
-                raise ValueError(
-                    f"Logits processor '{qualname}' could not be resolved: {e}"
-                ) from e
-            if isinstance(processor, LogitsProcessorConstructor):
-                logits_processor = logits_processor(
-                    *processor.args or [], **processor.kwargs or {}
-                )
-            logits_processors.append(logits_processor)
-        return logits_processors
-    elif processors:
-        raise ValueError(
-            "The `logits_processors` argument is not supported by this "
-            "server. See --logits-processor-pattern engine argument "
-            "for more information."
-        )
-    return None
 
 
 class FunctionCall(OpenAIBaseModel):

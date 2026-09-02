@@ -321,22 +321,6 @@ def _try_download_from_hf_hub(
         return None
 
 
-def get_hf_file_bytes(
-    file_name: str, model: str | Path, revision: str | None = "main"
-) -> bytes | None:
-    """Get file contents from HuggingFace repository as bytes."""
-    file_path = try_get_local_file(model=model, file_name=file_name, revision=revision)
-
-    if file_path is None:
-        file_path = _try_download_from_hf_hub(model, file_name, revision)
-
-    if isinstance(file_path, Path) and file_path.is_file():
-        with open(file_path, "rb") as file:
-            return file.read()
-
-    return None
-
-
 def try_get_local_file(
     model: str | Path, file_name: str, revision: str | None = "main"
 ) -> Path | Any | None:

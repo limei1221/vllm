@@ -419,26 +419,6 @@ def has_deep_ep() -> bool:
 DEEPEP_V2_MIN_NCCL_VERSION_RAW = 23004  # 2.30.4
 
 
-def _get_runtime_nccl_version() -> int | None:
-    """Get the runtime NCCL version by loading the actual library.
-
-    Returns the raw version int (e.g. 23004 for 2.30.4), or None on failure.
-    torch.cuda.nccl.version() is a compile-time constant from the PyTorch
-    wheel and does not reflect a separately installed NCCL.
-    """
-    import ctypes
-
-    try:
-        from vllm.utils.nccl import find_nccl_library
-
-        lib = ctypes.CDLL(find_nccl_library())
-        version = ctypes.c_int()
-        lib.ncclGetVersion(ctypes.byref(version))
-        return version.value
-    except Exception:
-        return None
-
-
 def _format_nccl_raw_version(raw: int) -> str:
     s = str(raw)
     return f"{s[0]}.{s[1:3].lstrip('0') or '0'}.{s[3:].lstrip('0') or '0'}"

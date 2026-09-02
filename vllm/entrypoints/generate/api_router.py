@@ -2,8 +2,6 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 from typing import TYPE_CHECKING
 
-from fastapi import FastAPI
-
 if TYPE_CHECKING:
     from argparse import Namespace
 
@@ -14,20 +12,6 @@ if TYPE_CHECKING:
     from vllm.tasks import SupportedTask
 else:
     RequestLogger = object
-
-
-def register_generate_api_routers(app: FastAPI):
-    from vllm.entrypoints.openai.chat_completion.api_router import (
-        attach_router as register_chat_api_router,
-    )
-
-    register_chat_api_router(app)
-
-    from vllm.entrypoints.openai.completion.api_router import (
-        attach_router as register_completion_api_router,
-    )
-
-    register_completion_api_router(app)
 
 
 async def init_generate_state(

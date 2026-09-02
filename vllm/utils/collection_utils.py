@@ -6,7 +6,6 @@ Contains helpers that are applied to collections.
 This is similar in concept to the `collections` module.
 """
 
-from collections import defaultdict
 from collections.abc import Callable, Generator, Hashable, Iterable, Mapping, Sequence
 from typing import Generic, Literal, TypeVar
 
@@ -105,30 +104,3 @@ def chunk_list(lst: list[T], chunk_size: int) -> Generator[list[T]]:
 def flatten_2d_lists(lists: Iterable[Iterable[T]]) -> list[T]:
     """Flatten a list of lists to a single list."""
     return [item for sublist in lists for item in sublist]
-
-
-def full_groupby(values: Iterable[_V], *, key: Callable[[_V], _K]):
-    """
-    Unlike [`itertools.groupby`][], groups are not broken by
-    non-contiguous data.
-    """
-    groups = defaultdict[_K, list[_V]](list)
-
-    for value in values:
-        groups[key(value)].append(value)
-
-    return groups.items()
-
-
-def swap_dict_values(obj: dict[_K, _V], key1: _K, key2: _K) -> None:
-    """Swap values between two keys."""
-    v1 = obj.get(key1)
-    v2 = obj.get(key2)
-    if v1 is not None:
-        obj[key2] = v1
-    else:
-        obj.pop(key2, None)
-    if v2 is not None:
-        obj[key1] = v2
-    else:
-        obj.pop(key1, None)

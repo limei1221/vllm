@@ -10,15 +10,9 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, NamedTuple
 
 from openai_harmony import HarmonyError, Message, Role
-from xgrammar import StructuralTag
 from xgrammar.structural_tag import (
     AnyTextFormat,
-    ConstStringFormat,
-    Format,
     JSONSchemaFormat,
-    OptionalFormat,
-    SequenceFormat,
-    TagFormat,
 )
 
 from vllm.entrypoints.chat_utils import make_tool_call_id
@@ -377,42 +371,3 @@ _FUNCTION_CALL_BEGINS = [
 ]
 _JSON_CONTENT = JSONSchemaFormat(json_schema={"type": "object"})
 _ANY_CONTENT = AnyTextFormat()
-
-
-def _assemble_tag(
-    allow_analysis: bool, allow_commentary: bool, content: Format
-) -> StructuralTag:
-    tags = []
-    if allow_analysis:
-        analysis_tag = OptionalFormat(
-            content=SequenceFormat(
-                elements=[
-                    TagFormat(
-                        begin="<|channel|>analysis<|message|>",
-                        content=_ANY_CONTENT,
-                        end="<|end|>",
-                    ),
-                    ConstStringFormat(value="<|start|>assistant"),
-                ]
-            )
-        )
-        tags.append(analysis_tag)
-
-    if allow_commentary:
-        commentary_tag = OptionalFormat(
-            content=SequenceFormat(
-                elements=[
-                    TagFormat(
-                        begin="<|channel|>commentary<|message|>",
-                        content=_ANY_CONTENT,
-                        end="<|end|>",
-                    ),
-                    ConstStringFormat(value="<|start|>assistant"),
-                ]
-            )
-        )
-        tags.append(commentary_tag)
-
-    tags.append(content)
-
-    return StructuralTag(format=SequenceFormat(elements=tags))

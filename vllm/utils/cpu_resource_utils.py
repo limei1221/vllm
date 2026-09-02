@@ -91,33 +91,6 @@ def get_cgroup_memory_limit() -> tuple[int | None, int | None]:
     return None, None
 
 
-def get_memory_affinity(pid: int = 0) -> list[int]:
-    pid = os.getpid() if pid == 0 else pid
-    path = f"/proc/{pid}/status"
-    with open(path) as f:
-        for line in f:
-            if line.startswith("Mems_allowed_list:"):
-                # Extract the string part (e.g., "0-1,3")
-                raw_list = line.split(":")[1].strip()
-                return parse_id_list(raw_list)
-    return []
-
-
-def parse_id_list(raw_str: str) -> list[int]:
-    """Parses strings like '0-2,4,7-8' into [0, 1, 2, 4, 7, 8]"""
-    result: list[int] = []
-    if not raw_str:
-        return result
-
-    for part in raw_str.split(","):
-        if "-" in part:
-            start, end = map(int, part.split("-"))
-            result.extend(range(start, end + 1))
-        else:
-            result.append(int(part))
-    return sorted(list(set(result)))
-
-
 def get_allowed_cpu_list() -> list[LogicalCPUInfo]:
     cpu_list = _get_cpu_list()
     if sys.platform == "linux":

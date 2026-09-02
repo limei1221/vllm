@@ -125,25 +125,3 @@ def _convert_req_index_to_global_index_kernel(
                 tl.store(valid_count_ptr + token_id, tile_valid_count)
             else:
                 tl.atomic_add(valid_count_ptr + token_id, tile_valid_count)
-
-
-def _remap_tiling(
-    NUM_TOPK_TOKENS: int, BLOCK_N: int, count_valid: bool
-) -> tuple[bool, int, int, int]:
-    """Pick the column tiling for the index remap kernel.
-
-    Counting the valid slots per row is the only reason the column tiles have to
-    talk to each other, so when counting give one program the whole row: the
-    count becomes an in-register reduction plus a plain store, needing neither
-    atomics nor a zero-initialized counter. The row is one ``tl.arange``, so this
-    needs a power-of-two width; other top-k sizes stay tiled and atomic.
-
-    Returns:
-        (single_tile, block_n, tiles_per_row, num_warps)
-    """
-    single_tile = (
-        count_valid and triton.next_power_of_2(NUM_TOPK_TOKENS) == NUM_TOPK_TOKENS
-    )
-    if single_tile:
-        return True, NUM_TOPK_TOKENS, 1, 8
-    return False, BLOCK_N, NUM_TOPK_TOKENS // BLOCK_N, 4

@@ -350,50 +350,6 @@ def common_broadcastable_dtype(dtypes: Collection[torch.dtype]):
     )
 
 
-def _generate_random_fp8(
-    tensor: torch.Tensor,
-    low: float,
-    high: float,
-) -> None:
-    # NOTE(zhaoyang): Due to NaN and Inf representation for fp8 data type,
-    # it may occur Inf or NaN if we directly use torch.randint
-    # to generate random data for fp8 data.
-    # For example, s.11111.00 in fp8e5m2 format represents Inf.
-    #     | E4M3        | E5M2
-    # -----|-------------|-------------------
-    # Inf | N/A         | s.11111.00
-    # NaN | s.1111.111  | s.11111.{01,10,11}
-    from vllm import _custom_ops as ops
-
-    tensor_tmp = torch.empty_like(tensor, dtype=torch.float16)
-    tensor_tmp.uniform_(low, high)
-    ops.convert_fp8(tensor, tensor_tmp)
-    del tensor_tmp
-
-
-def get_kv_cache_torch_dtype(
-    cache_dtype: str | torch.dtype | None,
-    model_dtype: str | torch.dtype | None = None,
-) -> torch.dtype:
-    if isinstance(cache_dtype, str):
-        if cache_dtype == "auto":
-            if isinstance(model_dtype, str) and model_dtype in STR_DTYPE_TO_TORCH_DTYPE:
-                torch_dtype = STR_DTYPE_TO_TORCH_DTYPE[model_dtype]
-            elif isinstance(model_dtype, torch.dtype):
-                torch_dtype = model_dtype
-            else:
-                raise ValueError(f"Invalid model dtype: {model_dtype}")
-        elif cache_dtype in STR_DTYPE_TO_TORCH_DTYPE:
-            torch_dtype = STR_DTYPE_TO_TORCH_DTYPE[cache_dtype]
-        else:
-            raise ValueError(f"Invalid kv cache dtype: {cache_dtype}")
-    elif isinstance(cache_dtype, torch.dtype):
-        torch_dtype = cache_dtype
-    else:
-        raise ValueError(f"Invalid kv cache dtype: {cache_dtype}")
-    return torch_dtype
-
-
 def get_kv_cache_quant_algo_string(quant_cfg: dict[str, Any]) -> str | None:
     """Get the KV cache quantization algorithm string from the quantization config.
 

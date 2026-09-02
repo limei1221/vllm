@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-from vllm.platforms import current_platform
 from vllm.triton_utils import tl, triton
 
 
@@ -59,72 +58,3 @@ def moe_fused_mul_sum_kernel(
         acc.to(outputs_ptr.dtype.element_ty),
         mask=mask,
     )
-
-
-def _heuristic_config(
-    num_tokens: int,
-    top_k: int,
-    size: int,
-    element_size: int,
-):
-    is_fp32 = element_size > 2
-    is_sm90_plus = current_platform.has_device_capability(90)
-    is_sm80_before = not current_platform.has_device_capability(80)
-
-    if current_platform.has_device_capability(90):
-        # SM90/SM100+: prefer small tiles + many CTAs.
-        if is_fp32:
-            BLOCK_M = 1 if num_tokens <= 4 else 2
-        else:
-            if num_tokens <= 4:
-                BLOCK_M = 1
-            elif num_tokens <= 128:
-                BLOCK_M = 2
-            else:
-                BLOCK_M = 4
-    elif is_fp32:
-        if num_tokens <= 4:
-            BLOCK_M = 1
-        elif num_tokens <= 32:
-            BLOCK_M = 2
-        elif num_tokens <= 128:
-            BLOCK_M = 4
-        else:
-            BLOCK_M = 4
-    else:
-        if num_tokens <= 4:
-            BLOCK_M = 1
-        elif num_tokens <= 32:
-            BLOCK_M = 2
-        elif num_tokens <= 128:
-            BLOCK_M = 4
-        elif num_tokens <= 1024:
-            BLOCK_M = 16
-        else:
-            BLOCK_M = 8
-
-    if is_fp32:
-        max_block_k = 256
-    elif is_sm80_before or is_sm90_plus:
-        max_block_k = 512
-    else:
-        max_block_k = 1024
-    BLOCK_K = min(triton.next_power_of_2(size), max_block_k)
-    BLOCK_K = max(BLOCK_K, 256)
-
-    total = BLOCK_M * BLOCK_K
-    if is_fp32:
-        num_warps = max(8, min(16, total // 64))
-    else:
-        num_warps = max(4, min(16, total // 256))
-
-    if is_sm80_before:
-        num_warps = min(num_warps, 8)
-        num_stages = 2
-    elif is_sm90_plus:
-        num_warps = min(num_warps, 8)
-        num_stages = 4 if total <= 2048 else 2
-    else:
-        num_stages = 4 if total <= 2048 else 2
-
-    return BLOCK_M, BLOCK_K, num_warps, num_stages

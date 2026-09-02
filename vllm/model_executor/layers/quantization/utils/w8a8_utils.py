@@ -55,24 +55,6 @@ def all_close_1d(x: torch.Tensor) -> bool:
     return all(torch.allclose(x[0], x[i]) for i in range(x.shape[0]))
 
 
-def convert_to_channelwise(
-    weight_scale: torch.Tensor, logical_widths: list[int]
-) -> tuple[torch.Tensor, torch.Tensor]:
-    # Create channelwise buffer
-    weight_scale_channel = torch.empty(
-        (sum(logical_widths), 1), dtype=torch.float32, device=weight_scale.device
-    )
-
-    # Expand each scale to match the size of each logical matrix.
-    start = 0
-    for idx, logical_width in enumerate(logical_widths):
-        end = start + logical_width
-        weight_scale_channel[start:end, :] = weight_scale[idx]
-        start = end
-
-    return weight_scale_channel
-
-
 def requantize_with_max_scale(
     weight: torch.Tensor, weight_scale: torch.Tensor, logical_widths: list[int]
 ) -> tuple[torch.Tensor, torch.Tensor]:

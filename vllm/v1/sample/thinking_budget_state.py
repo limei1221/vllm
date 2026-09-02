@@ -17,20 +17,6 @@ if TYPE_CHECKING:
     from vllm.config.reasoning import ReasoningConfig
 
 
-def maybe_create_thinking_budget_state_holder(
-    reasoning_config: "ReasoningConfig | None",
-    max_num_seqs: int,
-    num_spec_tokens: int,
-    device: torch.device,
-    is_pin_memory: bool,
-) -> "ThinkingBudgetStateHolder | None":
-    if reasoning_config is None:
-        return None
-    return ThinkingBudgetStateHolder(
-        reasoning_config, max_num_seqs, num_spec_tokens, device, is_pin_memory
-    )
-
-
 class ThinkingBudgetStateHolder:
     """Tracks thinking sections and forces end tokens when budget is exceeded."""
 

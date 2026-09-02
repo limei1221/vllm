@@ -253,19 +253,6 @@ def _jsonify_arg_value(value: Any) -> Any:
     return repr(value)
 
 
-def jsonify_non_default_args(
-    args: Namespace | EngineArgs,
-    *,
-    exclude: set[str] | None = None,
-) -> dict[str, Any]:
-    non_default_args = get_non_default_args(args)
-    if exclude is not None:
-        for key in exclude:
-            non_default_args.pop(key, None)
-
-    return {key: _jsonify_arg_value(value) for key, value in non_default_args.items()}
-
-
 def log_non_default_args(args: Namespace | EngineArgs):
     non_default_args = get_non_default_args(args)
     logger.info("non-default args: %s", non_default_args)

@@ -2,7 +2,6 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Utils for model executor."""
 
-import copy
 from typing import Any
 
 import torch
@@ -118,44 +117,6 @@ def replace_parameter(
         set_weight_attrs(new_param, {"weight_loader": weight_loader})
 
     setattr(layer, param_name, new_param)
-
-
-def get_packed_modules_mapping(model: torch.nn.Module) -> dict[str, list[str]]:
-    parent_map = getattr(model, "packed_modules_mapping", None)
-    parent_map = copy.deepcopy(parent_map) if parent_map is not None else {}
-
-    # don't infer mapping if the model has defined it explicitly.
-    if parent_map:
-        return parent_map
-
-    # We only check main components instead of whole model submodules
-    for child in model.children():
-        child_map = getattr(child, "packed_modules_mapping", None)
-        child_map = copy.deepcopy(child_map) if child_map is not None else {}
-
-        if any((k in parent_map and parent_map[k] != v) for k, v in child_map.items()):
-            raise ValueError(
-                f"Can't update {type(model).__name__}'s packed_modules_mapping "
-                f"safely because of conflicts from {type(child).__name__}."
-            )
-        else:
-            parent_map.update(child_map)
-    return parent_map
-
-
-def get_moe_expert_mapping(
-    model: torch.nn.Module,
-) -> list[tuple[str, str, int, str]]:
-    """Get the expert mapping from a model.
-
-    It will be retrieved from the first module that has a `get_expert_mapping` method.
-    If the model manually implements `get_expert_mapping`, it will be used.
-    Otherwise, it will use the first RoutedExperts layer."""
-    for _, module in model.named_modules():
-        get_mapping = getattr(module, "get_expert_mapping", None)
-        if get_mapping is not None:
-            return get_mapping()
-    raise ValueError("No module in the model has a `get_expert_mapping` method.")
 
 
 def maybe_disable_graph_partition(current_backend: str) -> dict[str, bool]:
