@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-import os
 import socket
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal, overload
@@ -33,7 +32,7 @@ DistributedExecutorBackend = Literal["mp", "uni"]
 DataParallelBackend = Literal["mp"]
 EPLBPolicyOption = Literal["default"]
 DCPCommBackend = Literal["ag_rs", "a2a"]
-EPLBCommunicatorBackend = Literal["torch_nccl", "torch_gloo", "nixl", "pynccl"]
+EPLBCommunicatorBackend = Literal["torch_nccl", "torch_gloo", "pynccl"]
 All2AllBackend = Literal[
     "naive",
     "pplx",
@@ -42,7 +41,6 @@ All2AllBackend = Literal[
     "deepep_v2",
     "mori_high_throughput",
     "mori_low_latency",
-    "nixl_ep",
     "allgather_reducescatter",
     "flashinfer_all2allv",  # temporary alias for flashinfer_nvlink_two_sided
     "flashinfer_nvlink_two_sided",
@@ -89,9 +87,8 @@ class EPLBConfig:
     Backend for EPLB expert weight communication:
     - "torch_nccl": Use torch.distributed on the device process group
     - "torch_gloo": Use torch.distributed gloo with CPU staging
-    - "nixl": Use NIXL with staged send/recv buffers
     - "pynccl": Use PyNccl send/recv
-    - None: Auto-select backend (prefers "nixl", falls back to "torch_gloo")
+    - None: Auto-select backend (prefers "pynccl", falls back to "torch_gloo")
     """
 
     @model_validator(mode="after")
@@ -102,7 +99,7 @@ class EPLBConfig:
             raise ValueError(
                 f"{self.communicator} communicator is incompatible with "
                 "async EPLB due to NCCL multi-stream conflicts. Use "
-                "'torch_gloo' or 'nixl' instead, or leave communicator "
+                "'torch_gloo' instead, or leave communicator "
                 "unset for automatic selection."
             )
         if self.log_balancedness and self.log_balancedness_interval <= 0:
@@ -188,7 +185,6 @@ class ParallelConfig:
     - "deepep_low_latency": Use deepep low-latency kernels
     - "mori_high_throughput": MoRI EP with InterNodeV1 for multi-node
     - "mori_low_latency": MoRI EP with InterNodeV1LL for multi-node
-    - "nixl_ep": Use nixl-ep kernels
     - "flashinfer_nvlink_two_sided": Use flashinfer two-sided kernels for mnnvl
     - "flashinfer_nvlink_one_sided": Use flashinfer high-throughput a2a kernels"""
 
@@ -669,7 +665,6 @@ class ParallelConfig:
                 "deepep_low_latency",
                 "mori_high_throughput",
                 "mori_low_latency",
-                "nixl_ep",
             )
             and self.enable_expert_parallel
             and self.tensor_parallel_size > 1
@@ -687,11 +682,7 @@ class ParallelConfig:
     @property
     def use_batched_dp_moe(self) -> bool:
         return (
-            self.all2all_backend
-            in (
-                "deepep_low_latency",
-                "nixl_ep",
-            )
+            self.all2all_backend in ("deepep_low_latency",)
             and self.enable_expert_parallel
             and self.data_parallel_size > 1
         )
@@ -863,14 +854,10 @@ class ParallelConfig:
                     "server and core client to coordinate scale up/down."
                 )
             if self.eplb_config.use_async:
-                from vllm.distributed.nixl_utils import is_nixl_available
-
-                if not is_nixl_available():
-                    raise ValueError(
-                        "Elastic EP with async EPLB requires the NIXL "
-                        "package. Either install NIXL or set "
-                        "--eplb-config.use_async=false."
-                    )
+                raise ValueError(
+                    "Elastic EP with async EPLB is not supported by this "
+                    "build. Set --eplb-config.use_async=false."
+                )
 
         if self.data_parallel_size > 1 or self.data_parallel_size_local == 0:
             # Data parallel was specified in the engine args.
@@ -937,18 +924,12 @@ class ParallelConfig:
             )
 
         if self.enable_eplb and self.eplb_config.communicator is None:
-            # Prefer NIXL when available: zero-copy RDMA reads, compatible
-            # with both async EPLB and elastic EP (deferred remote setup).
-            # Fallbacks: pynccl for elastic EP (stateless groups need it),
-            # torch_gloo for static EP.  torch_nccl is avoided because NCCL
-            # is incompatible with async EPLB (multi-stream conflicts) and
+            # pynccl for elastic EP (stateless groups need it), torch_gloo
+            # for static EP.  torch_nccl is avoided because NCCL is
+            # incompatible with async EPLB (multi-stream conflicts) and
             # batched isend/irecv hangs under high load.
             # See https://github.com/pytorch/pytorch/issues/174288
-            from vllm.distributed.nixl_utils import is_nixl_available
-
-            if is_nixl_available():
-                self.eplb_config.communicator = "nixl"
-            elif self.enable_elastic_ep:
+            if self.enable_elastic_ep:
                 self.eplb_config.communicator = "pynccl"
             else:
                 self.eplb_config.communicator = "torch_gloo"

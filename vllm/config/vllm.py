@@ -944,11 +944,10 @@ class VllmConfig:
 
         # PyTorch's expandable_segments allocator uses CUDA VMM, which can
         # remap a virtual address range to different physical pages over the
-        # engine's lifetime. KV connectors that pin KV cache memory (e.g.
-        # NixlConnector via ibv_reg_mr) end up with their
-        # registrations pointing at stale physical pages after any remap,
-        # producing RDMA failures like IBV_WC_REM_ACCESS_ERR /
-        # NIXL_ERR_REMOTE_DISCONNECT at the first inter-node KV transfer.
+        # engine's lifetime. KV connectors that pin KV cache memory (via
+        # ibv_reg_mr, say) end up with their registrations pointing at stale
+        # physical pages after any remap, producing RDMA failures like
+        # IBV_WC_REM_ACCESS_ERR at the first inter-node KV transfer.
         # We can't enumerate every in-tree and out-of-tree connector that
         # pins memory, so we conservatively reject the combination whenever
         # any KV connector is configured.
@@ -970,7 +969,7 @@ class VllmConfig:
             "unless enable_cumem_allocator is also enabled. PyTorch's CUDA VMM "
             "allocator can remap KV cache virtual addresses to different "
             "physical pages, invalidating any pinned/registered KV memory "
-            "(e.g. IB memory regions registered by NIXL). Either "
+            "(e.g. registered IB memory regions). Either "
             "unset expandable_segments:True or enable the cumem allocator "
             "(sleep mode does this automatically and also "
             "routes KV allocations through CuMemAllocator's pool, where "
@@ -1614,14 +1613,13 @@ class VllmConfig:
             assert a2a_backend in [
                 "deepep_low_latency",
                 "deepep_high_throughput",
-                "nixl_ep",
             ], (
-                "Microbatching currently only supports the deepep_low_latency, "
-                "deepep_high_throughput, and nixl_ep all2all backends. "
+                "Microbatching currently only supports the deepep_low_latency "
+                "and deepep_high_throughput all2all backends. "
                 f"{a2a_backend} is not supported. To fix use "
-                "--all2all-backend=deepep_low_latency, "
-                "--all2all-backend=deepep_high_throughput, or "
-                "--all2all-backend=nixl_ep and install the matching kernels."
+                "--all2all-backend=deepep_low_latency or "
+                "--all2all-backend=deepep_high_throughput "
+                "and install the matching kernels."
             )
 
             if not self.model_config.disable_cascade_attn:

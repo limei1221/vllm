@@ -49,7 +49,7 @@ class OMPProcessManager:
             in (CpuArchEnum.ARM, CpuArchEnum.RISCV)
             else 1
         )
-        # reserve at one more core for nixl_connector under p/d case
+        # reserve at one more core for the KV connector under p/d case
         if config.kv_transfer_config:
             self.reserve_cpu_num += 1
 

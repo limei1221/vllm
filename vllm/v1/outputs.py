@@ -273,7 +273,7 @@ class KVConnectorOutput:
     invalid_block_ids: set[int] = field(default_factory=set)
     # Configuration describing how many finished sending/receiving
     # notifications should be expected for each request. This allows
-    # handshake-based connectors like Nixl to update the KVOutputAggregator.
+    # handshake-based connectors to update the KVOutputAggregator.
     # It captures a static setup info and should almost always remain constant
     # for a given connector after discovery. Default value entails no change.
     expected_finished_count: int = 0

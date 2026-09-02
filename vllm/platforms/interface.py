@@ -1215,21 +1215,6 @@ class Platform:
         return _synced_weight_loader
 
     @classmethod
-    def get_nixl_supported_devices(cls) -> dict[str, tuple[str, ...]]:
-        """
-        Returns a mapping from device_type to a tuple of supported
-        kv_buffer_device for nixl.
-        """
-        return {}
-
-    @classmethod
-    def get_nixl_memory_type(cls) -> str | None:
-        """
-        Returns the nixl memory type for the current platform.
-        """
-        return None
-
-    @classmethod
     def check_max_model_len(cls, max_model_len: int) -> int:
         """
         Check max_model_len for the current platform.

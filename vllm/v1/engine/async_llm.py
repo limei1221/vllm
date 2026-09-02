@@ -754,7 +754,7 @@ class AsyncLLM(EngineClient):
         data_parallel_rank: int | None = None,
     ) -> None:
         """Submit a pre-aborted request so the connector's request_finished
-        hook runs to free any pre-admission KV-transfer resources (e.g. NIXL
+        hook runs to free any pre-admission KV-transfer resources (e.g. RDMA
         prefill blocks pinned on the P node)."""
         request = EngineCoreRequest(
             request_id=request_id,

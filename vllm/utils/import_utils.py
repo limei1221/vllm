@@ -497,11 +497,6 @@ def has_deep_gemm() -> bool:
     return _has_module("deep_gemm") or _has_module("vllm.third_party.deep_gemm")
 
 
-def has_nixl_ep() -> bool:
-    """Whether the optional `nixl_ep` package is available."""
-    return _has_module("nixl_ep")
-
-
 def is_numba_available() -> bool:
     """Whether the optional `numba` package is available."""
     return _has_module("numba")

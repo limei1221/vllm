@@ -307,7 +307,7 @@ class KVCacheManager:
         while a deeper Mamba state survives, or vice versa. Report the
         full-attention hit as the local prefix - the connector transfers the
         remaining suffix and the Mamba state is transferred unconditionally by
-        nixl's ``_apply_prefix_caching`` - and flag when that hit ran deeper
+        the connector's ``_apply_prefix_caching`` - and flag when that hit ran deeper
         than a lagging group. Such a hit only has a valid Mamba state at its
         boundary if the connector supplies it, so the caller must fall back to
         ``get_computed_blocks`` to reconcile when no external tokens are found.

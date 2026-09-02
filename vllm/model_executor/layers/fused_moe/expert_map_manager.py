@@ -137,7 +137,7 @@ def determine_expert_placement_strategy(
         ):
             logger.warning(
                 "Round-robin expert placement currently only supports "
-                "the DeepEP low-latency or NIXL EP backend, but '%s' was configured. "
+                "the DeepEP low-latency backend, but '%s' was configured. "
                 "Falling back to linear expert placement.",
                 moe_parallel_config.all2all_backend,
             )
@@ -418,7 +418,7 @@ class ExpertMapManager:
             and not self.moe_parallel_config.needs_round_robin_routing_tables
         ):
             logger.warning(
-                "Round-robin placement requires DeepEP-ll or NIXL backend. "
+                "Round-robin placement requires the DeepEP-ll backend. "
                 "Falling back to linear."
             )
             return "linear"

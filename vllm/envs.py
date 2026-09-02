@@ -156,8 +156,6 @@ if TYPE_CHECKING:
     VLLM_MSGPACK_ZERO_COPY_THRESHOLD: int = 256
     VLLM_ALLOW_INSECURE_SERIALIZATION: bool = False
     VLLM_DISABLE_REQUEST_ID_RANDOMIZATION: bool = False
-    VLLM_NIXL_SIDE_CHANNEL_HOST: str = "localhost"
-    VLLM_NIXL_SIDE_CHANNEL_PORT: int = 5600
     VLLM_P2P_SIDE_CHANNEL_HOST: str = "localhost"
     VLLM_P2P_SIDE_CHANNEL_PORT: int = 5710
     VLLM_EC_SIDE_CHANNEL_HOST: str = "localhost"
@@ -223,7 +221,6 @@ if TYPE_CHECKING:
     VLLM_ELASTIC_EP_SCALE_UP_LAUNCH: bool = False
     VLLM_ELASTIC_EP_DRAIN_REQUESTS: bool = False
     VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: bool = True
-    VLLM_NIXL_EP_MAX_NUM_RANKS: int = 32
     VLLM_XPU_USE_SAMPLER_KERNEL: bool = True
     VLLM_GPU_NIC_PCIE_MAPPING: str = ""
     VLLM_NIC_SELECTION_VARS: str = ""
@@ -1125,14 +1122,6 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "VLLM_DISABLE_REQUEST_ID_RANDOMIZATION": lambda: bool(
         int(os.getenv("VLLM_DISABLE_REQUEST_ID_RANDOMIZATION", "0"))
     ),
-    # IP address used for NIXL handshake between remote agents.
-    "VLLM_NIXL_SIDE_CHANNEL_HOST": lambda: os.getenv(
-        "VLLM_NIXL_SIDE_CHANNEL_HOST", "localhost"
-    ),
-    # Port used for NIXL handshake between remote agents.
-    "VLLM_NIXL_SIDE_CHANNEL_PORT": lambda: int(
-        os.getenv("VLLM_NIXL_SIDE_CHANNEL_PORT", "5600")
-    ),
     # Address the P2P KV-offload control socket binds to. Defaults to
     # ``localhost`` (loopback only); must be set to the node IP for
     # cross-host P2P so remote peers can reach the socket.
@@ -1502,10 +1491,6 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS": lambda: bool(
         int(os.getenv("VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS", "1"))
     ),
-    # NIXL EP environment variables
-    "VLLM_NIXL_EP_MAX_NUM_RANKS": lambda: int(
-        os.getenv("VLLM_NIXL_EP_MAX_NUM_RANKS", "32")
-    ),
     # whether use xpu specific sample kernel
     "VLLM_XPU_USE_SAMPLER_KERNEL": lambda: bool(
         int(os.getenv("VLLM_XPU_USE_SAMPLER_KERNEL", "1"))
@@ -1639,7 +1624,6 @@ def compile_factors() -> dict[str, object]:
         "VLLM_SERVER_DEV_MODE",
         "VLLM_DP_MASTER_IP",
         "VLLM_DP_MASTER_PORT",
-        "VLLM_NIXL_SIDE_CHANNEL_HOST",
         "VLLM_RANDOMIZE_DP_DUMMY_INPUTS",
         "VLLM_MODEL_REDIRECT_PATH",
         "VLLM_HOST_IP",
