@@ -517,7 +517,6 @@ def get_and_maybe_dequant_weights(
     # Simple Fp8 case: rescale with tensor or block weight scales
     if (
         isinstance(layer.quant_method, Fp8LinearMethod)
-        and not layer.quant_method.use_marlin
         # DeepGEMM transforms the scales using `transform_sf_into_required_layout` into
         # a layout that is not compatible with `scaled_dequantize`.
         and not layer.quant_method.use_deep_gemm

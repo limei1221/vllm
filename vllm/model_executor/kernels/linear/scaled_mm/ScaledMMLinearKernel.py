@@ -22,14 +22,6 @@ from ..base import MMLinearLayerConfig
 
 
 @dataclass
-class Int8ScaledMMLinearLayerConfig(MMLinearLayerConfig):
-    # TODO: Change to QuantKey like FP8ScaledMMLinearLayerConfig
-    is_static_input_scheme: bool
-    is_channelwise: bool
-    input_symmetric: bool
-
-
-@dataclass
 class FP8ScaledMMLinearLayerConfig(MMLinearLayerConfig):
     weight_quant_key: QuantKey
     activation_quant_key: QuantKey
@@ -185,17 +177,3 @@ class FP8ScaledMMLinearKernel(
 
     def get_output_padding(self) -> int | None:
         return None
-
-
-class Int8ScaledMMLinearKernel(
-    ScaledMMLinearKernel[Int8ScaledMMLinearLayerConfig, _Int8ParamsT], ABC
-):
-    def _get_layer_params(self, layer) -> _Int8ParamsT:
-        w_q, w_s, i_s, i_zp, azp_adj = self.layer_param_names
-        return (
-            getattr(layer, w_q),
-            getattr(layer, w_s),
-            getattr(layer, i_s, None),
-            getattr(layer, i_zp, None),
-            getattr(layer, azp_adj, None),
-        )

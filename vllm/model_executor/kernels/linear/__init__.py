@@ -16,8 +16,6 @@ from vllm.model_executor.kernels.linear.scaled_mm import (
     Fp8BlockScaledMMLinearKernel,
     FP8ScaledMMLinearKernel,
     FP8ScaledMMLinearLayerConfig,
-    Int8ScaledMMLinearKernel,
-    Int8ScaledMMLinearLayerConfig,
     ScaledMMLinearKernel,
 )
 from vllm.model_executor.kernels.linear.scaled_mm.b12x_block import (
@@ -29,7 +27,6 @@ from vllm.model_executor.kernels.linear.scaled_mm.b12x_tensor import (
 from vllm.model_executor.kernels.linear.scaled_mm.cutlass import (
     CutlassFp8BlockScaledMMKernel,
     CutlassFP8ScaledMMLinearKernel,
-    CutlassInt8ScaledMMLinearKernel,
 )
 from vllm.model_executor.kernels.linear.scaled_mm.deep_gemm import (
     DeepGemmFp8BlockScaledMMKernel,
@@ -37,13 +34,6 @@ from vllm.model_executor.kernels.linear.scaled_mm.deep_gemm import (
 from vllm.model_executor.kernels.linear.scaled_mm.flashinfer import (
     FlashInferFp8DeepGEMMDynamicBlockScaledKernel,
     FlashInferFP8ScaledMMLinearKernel,
-)
-from vllm.model_executor.kernels.linear.scaled_mm.humming import (
-    HummingFP8ScaledMMLinearKernel,
-    HummingInt8ScaledMMLinearKernel,
-)
-from vllm.model_executor.kernels.linear.scaled_mm.marlin import (
-    MarlinFP8ScaledMMLinearKernel,
 )
 from vllm.model_executor.kernels.linear.scaled_mm.pytorch import (
     BlockWiseTorchFP8ScaledMMLinearKernel,
@@ -53,7 +43,6 @@ from vllm.model_executor.kernels.linear.scaled_mm.pytorch import (
 )
 from vllm.model_executor.kernels.linear.scaled_mm.triton import (
     TritonFp8BlockScaledMMKernel,
-    TritonInt8ScaledMMLinearKernel,
 )
 from vllm.model_executor.layers.quantization.utils.quant_utils import QuantKey
 from vllm.platforms import PlatformEnum, current_platform
@@ -63,23 +52,13 @@ logger = init_logger(__name__)
 _KernelT = TypeVar("_KernelT", bound=ScaledMMLinearKernel | MMLinearKernel)
 _KernelConfigT = TypeVar("_KernelConfigT", bound=MMLinearLayerConfig)
 
-_POSSIBLE_INT8_KERNELS: dict[PlatformEnum, list[type[Int8ScaledMMLinearKernel]]] = {
-    PlatformEnum.CUDA: [
-        CutlassInt8ScaledMMLinearKernel,
-        TritonInt8ScaledMMLinearKernel,
-        HummingInt8ScaledMMLinearKernel,
-    ],
-}
-
 _POSSIBLE_FP8_KERNELS: dict[PlatformEnum, list[type[FP8ScaledMMLinearKernel]]] = {
     PlatformEnum.CUDA: [
-        MarlinFP8ScaledMMLinearKernel,
         FlashInferFP8ScaledMMLinearKernel,
         CutlassFP8ScaledMMLinearKernel,
         B12xTensorFP8ScaledMMLinearKernel,
         PerTensorTorchFP8ScaledMMLinearKernel,
         ChannelWiseTorchFP8ScaledMMLinearKernel,
-        HummingFP8ScaledMMLinearKernel,
     ],
 }
 
@@ -92,17 +71,8 @@ _POSSIBLE_FP8_BLOCK_KERNELS: dict[
         DeepGemmFp8BlockScaledMMKernel,
         CutlassFp8BlockScaledMMKernel,
         B12xFp8BlockScaledMMKernel,
-        MarlinFP8ScaledMMLinearKernel,
         TritonFp8BlockScaledMMKernel,
-        HummingFP8ScaledMMLinearKernel,
         BlockWiseTorchFP8ScaledMMLinearKernel,
-    ],
-}
-
-_POSSIBLE_WFP8A16_KERNELS: dict[PlatformEnum, list[type[FP8ScaledMMLinearKernel]]] = {
-    PlatformEnum.CUDA: [
-        HummingFP8ScaledMMLinearKernel,
-        MarlinFP8ScaledMMLinearKernel,
     ],
 }
 
@@ -220,47 +190,17 @@ def init_fp8_linear_kernel(
     return kernel_type(config)
 
 
-def init_int8_linear_kernel(
-    config: _KernelConfigT,
-    compute_capability: int | None = None,
-) -> Int8ScaledMMLinearKernel:
-    kernel_type = choose_scaled_mm_linear_kernel(
-        config,
-        _POSSIBLE_INT8_KERNELS,
-        compute_capability,
-    )
-    return kernel_type(config)  # type: ignore
-
-
-def init_wfp8_a16_linear_kernel(
-    config: _KernelConfigT,
-    compute_capability: int | None = None,
-) -> FP8ScaledMMLinearKernel:
-    kernel_type = choose_scaled_mm_linear_kernel(
-        config,
-        _POSSIBLE_WFP8A16_KERNELS,
-        compute_capability,
-    )
-    return kernel_type(config)  # type: ignore
-
-
 __all__ = [
     "init_fp8_linear_kernel",
-    "init_int8_linear_kernel",
-    "init_wfp8_a16_linear_kernel",
     "FP8ScaledMMLinearKernel",
-    "Int8ScaledMMLinearKernel",
     "ScaledMMLinearKernel",
     "FP8ScaledMMLinearLayerConfig",
-    "Int8ScaledMMLinearLayerConfig",
     "ScaledMMLinearLayerConfig",
     "CutlassFP8ScaledMMLinearKernel",
-    "CutlassInt8ScaledMMLinearKernel",
     "FlashInferFP8ScaledMMLinearKernel",
     "ChannelWiseTorchFP8ScaledMMLinearKernel",
     "PerTensorTorchFP8ScaledMMLinearKernel",
     "RowWiseTorchFP8ScaledMMLinearKernel",
-    "TritonInt8ScaledMMLinearKernel",
     "_KernelT",
     "DeepGemmFp8BlockScaledMMKernel",
     "FlashInferFp8DeepGEMMDynamicBlockScaledKernel",

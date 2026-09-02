@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 from enum import Enum
-from typing import Any
 
 import torch
 
@@ -26,9 +25,6 @@ from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
 from vllm.model_executor.layers.quantization.utils.fp8_utils import (
     prepare_fp8_moe_layer_for_deepgemm,
 )
-from vllm.model_executor.layers.quantization.utils.marlin_utils_fp8 import (
-    prepare_fp8_moe_layer_for_marlin,
-)
 from vllm.model_executor.layers.quantization.utils.quant_utils import (
     QuantKey,
     kFp8Dynamic128Sym,
@@ -45,8 +41,6 @@ class Fp8MoeBackend(Enum):
     FLASHINFER_CUTLASS = "FLASHINFER_CUTLASS"
     DEEPGEMM = "DEEPGEMM"
     BATCHED_DEEPGEMM = "BATCHED_DEEPGEMM"
-    MARLIN = "MARLIN"
-    HUMMING = "HUMMING"
     TRITON = "TRITON"
     BATCHED_TRITON = "BATCHED_TRITON"
     AITER = "AITER"
@@ -84,8 +78,6 @@ def _get_priority_backends(
         Fp8MoeBackend.DEEPGEMM,
         Fp8MoeBackend.VLLM_CUTLASS,
         Fp8MoeBackend.TRITON,
-        Fp8MoeBackend.MARLIN,
-        Fp8MoeBackend.HUMMING,
         Fp8MoeBackend.BATCHED_DEEPGEMM,
         Fp8MoeBackend.BATCHED_VLLM_CUTLASS,
         Fp8MoeBackend.BATCHED_TRITON,
@@ -155,26 +147,6 @@ def backend_to_kernel_cls(
         )
 
         return [BatchedDeepGemmExperts]
-
-    elif backend == Fp8MoeBackend.HUMMING:
-        from vllm.model_executor.layers.fused_moe.experts.fused_humming_moe import (
-            BatchedHummingGroupedExperts,
-            HummingGroupedExperts,
-            HummingIndexedExperts,
-        )
-
-        return [
-            BatchedHummingGroupedExperts,
-            HummingGroupedExperts,
-            HummingIndexedExperts,
-        ]
-
-    elif backend == Fp8MoeBackend.MARLIN:
-        from vllm.model_executor.layers.fused_moe.experts.marlin_moe import (
-            MarlinExperts,
-        )
-
-        return [MarlinExperts]
 
     elif backend == Fp8MoeBackend.TRITON:
         from vllm.model_executor.layers.fused_moe.experts.triton_moe import (
@@ -246,8 +218,6 @@ def map_fp8_backend(runner_backend: MoEBackend) -> Fp8MoeBackend:
         "cutlass": Fp8MoeBackend.VLLM_CUTLASS,
         "flashinfer_trtllm": Fp8MoeBackend.FLASHINFER_TRTLLM,
         "flashinfer_cutlass": Fp8MoeBackend.FLASHINFER_CUTLASS,
-        "marlin": Fp8MoeBackend.MARLIN,
-        "humming": Fp8MoeBackend.HUMMING,
         "aiter": Fp8MoeBackend.AITER,
         "hpc": Fp8MoeBackend.HPC,
     }
@@ -361,13 +331,6 @@ def select_fp8_moe_backend(
                 backend, config, weight_key, activation_key, activation_format
             )
 
-    # Handle explicit MARLIN FP8 configuration.
-    if envs.VLLM_TEST_FORCE_FP8_MARLIN:
-        backend = Fp8MoeBackend.MARLIN
-        return _return_or_raise(
-            backend, config, weight_key, activation_key, activation_format
-        )
-
     # Handle explicit AITER FP8 configuration.
     if envs.is_set("VLLM_ROCM_USE_AITER") or envs.is_set("VLLM_ROCM_USE_AITER_MOE"):
         skip_aiter_moe = (
@@ -416,41 +379,6 @@ def select_fp8_moe_backend(
     return Fp8MoeBackend.NONE, None
 
 
-def _humming_fp8_weight_schema(
-    layer: RoutedExperts, weight: torch.Tensor, weight_scale: torch.Tensor
-) -> dict[str, Any]:
-    """Build the humming weight schema from the canonical on-device fp8/mxfp8
-    tensors (scale dtype/shape, block size), not the producing quant method."""
-    # mxfp8: e8m0 group-32 scales (stored as uint8 bytes or e8m0). humming has
-    # no compressed-tensors mxfp8 loader; its modelopt schema fits both sources.
-    if weight_scale.dtype in (torch.uint8, torch.float8_e8m0fnu):
-        return {"quant_method": "modelopt", "quant_algo": "mxfp8"}
-
-    if hasattr(layer, "w13_weight_scale_inv"):
-        assert hasattr(layer, "weight_block_size")
-        return {"quant_method": "fp8", "weight_block_size": layer.weight_block_size}
-
-    # fp8 (e4m3): recover the strategy from the scale layout (block from
-    # weight_block_size, else channel vs tensor by per-expert scale count).
-    config: dict[str, Any] = {
-        "quant_method": "compressed-tensors",
-        "format": "float-quantized",
-        "type": "float",
-        "num_bits": 8,
-        "symmetric": True,
-    }
-    weight_block_size = getattr(layer, "weight_block_size", None)
-    num_experts, num_output = weight.shape[0], weight.shape[-2]
-    if weight_block_size is not None:
-        config["strategy"] = "block"
-        config["block_structure"] = list(weight_block_size)
-    elif weight_scale.numel() >= num_experts * num_output:
-        config["strategy"] = "channel"
-    else:
-        config["strategy"] = "tensor"
-    return config
-
-
 def convert_to_fp8_moe_kernel_format(
     fp8_backend: Fp8MoeBackend,
     # TODO(bnell): replace layer with weight_block_size
@@ -482,40 +410,6 @@ def convert_to_fp8_moe_kernel_format(
         )
         w13.is_shuffled = True
         w2.is_shuffled = True
-    elif fp8_backend == Fp8MoeBackend.HUMMING:
-        from vllm.model_executor.layers.quantization.utils.humming_utils import (
-            convert_to_humming_moe_kernel_format,
-        )
-
-        convert_to_humming_moe_kernel_format(
-            layer, quant_config=_humming_fp8_weight_schema(layer, w13, w13_scale)
-        )
-        w13 = layer.w13_weight
-        w2 = layer.w2_weight
-        w13_scale = layer.w13_weight_scale
-        w2_scale = layer.w2_weight_scale
-    elif fp8_backend == Fp8MoeBackend.MARLIN:
-        weight_block_size = getattr(layer, "weight_block_size", None)
-        if weight_block_size == [1, 32]:
-            from vllm.model_executor.layers.quantization.utils.marlin_utils_fp8 import (
-                prepare_mxfp8_moe_layer_for_marlin,
-            )
-
-            w13, w2, w13_scale, w2_scale = prepare_mxfp8_moe_layer_for_marlin(
-                layer,
-                w13,
-                w2,
-                w13_scale,
-                w2_scale,
-            )
-        else:
-            w13, w2, w13_scale, w2_scale = prepare_fp8_moe_layer_for_marlin(
-                layer,
-                w13,
-                w2,
-                w13_scale,
-                w2_scale,
-            )
     elif fp8_backend in [
         Fp8MoeBackend.FLASHINFER_CUTLASS,
         Fp8MoeBackend.FLASHINFER_TRTLLM,
@@ -591,27 +485,14 @@ def make_fp8_moe_quant_config(
     a method of the modular kernel itself.
     """
 
-    # MARLIN and CPU are mixed precision W8A16 config.
-    if fp8_backend == Fp8MoeBackend.MARLIN or fp8_backend == Fp8MoeBackend.CPU:
+    # CPU is a mixed precision W8A16 config.
+    if fp8_backend == Fp8MoeBackend.CPU:
         return fp8_w8a16_moe_quant_config(
             w1_scale=w1_scale,
             w2_scale=w2_scale,
             w1_bias=w1_bias,
             w2_bias=w2_bias,
             block_shape=block_shape,
-            gemm1_alpha=gemm1_alpha,
-            gemm1_beta=gemm1_beta,
-            gemm1_clamp_limit=swiglu_limit,
-        )
-    elif fp8_backend == Fp8MoeBackend.HUMMING:
-        from vllm.model_executor.layers.fused_moe import RoutedExperts
-        from vllm.model_executor.layers.quantization.utils.humming_utils import (
-            get_humming_moe_quant_config,
-        )
-
-        assert isinstance(layer, RoutedExperts)
-        return get_humming_moe_quant_config(
-            layer,
             gemm1_alpha=gemm1_alpha,
             gemm1_beta=gemm1_beta,
             gemm1_clamp_limit=swiglu_limit,

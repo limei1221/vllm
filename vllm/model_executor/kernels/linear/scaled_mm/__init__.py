@@ -6,13 +6,9 @@ from vllm.model_executor.kernels.linear.scaled_mm.BlockScaledMMLinearKernel impo
 )
 from vllm.model_executor.kernels.linear.scaled_mm.cutlass import (
     CutlassFP8ScaledMMLinearKernel,
-    CutlassInt8ScaledMMLinearKernel,
 )
 from vllm.model_executor.kernels.linear.scaled_mm.flashinfer import (
     FlashInferFP8ScaledMMLinearKernel,
-)
-from vllm.model_executor.kernels.linear.scaled_mm.marlin import (
-    MarlinFP8ScaledMMLinearKernel,
 )
 from vllm.model_executor.kernels.linear.scaled_mm.pytorch import (
     ChannelWiseTorchFP8ScaledMMLinearKernel,
@@ -22,28 +18,17 @@ from vllm.model_executor.kernels.linear.scaled_mm.pytorch import (
 from vllm.model_executor.kernels.linear.scaled_mm.ScaledMMLinearKernel import (
     FP8ScaledMMLinearKernel,
     FP8ScaledMMLinearLayerConfig,
-    Int8ScaledMMLinearKernel,
-    Int8ScaledMMLinearLayerConfig,
     ScaledMMLinearKernel,
-)
-from vllm.model_executor.kernels.linear.scaled_mm.triton import (
-    TritonInt8ScaledMMLinearKernel,
 )
 
 __all__ = [
     "FP8ScaledMMLinearKernel",
     "FP8ScaledMMLinearLayerConfig",
-    "Int8ScaledMMLinearKernel",
-    "Int8ScaledMMLinearLayerConfig",
     "ScaledMMLinearKernel",
-    "ScaledMMLinearLayerConfig",
     "CutlassFP8ScaledMMLinearKernel",
-    "CutlassInt8ScaledMMLinearKernel",
     "FlashInferFP8ScaledMMLinearKernel",
-    "MarlinFP8ScaledMMLinearKernel",
     "ChannelWiseTorchFP8ScaledMMLinearKernel",
     "PerTensorTorchFP8ScaledMMLinearKernel",
     "RowWiseTorchFP8ScaledMMLinearKernel",
-    "TritonInt8ScaledMMLinearKernel",
     "Fp8BlockScaledMMLinearKernel",
 ]
