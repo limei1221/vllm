@@ -7,15 +7,6 @@ from typing import TYPE_CHECKING
 import torch
 
 from vllm.logger import init_logger
-from vllm.model_executor.kernels.linear.mxfp4.b12x import (
-    warmup_b12x_mxfp4_linear,
-)
-from vllm.model_executor.kernels.linear.mxfp8.b12x import (
-    warmup_b12x_mxfp8_linear,
-)
-from vllm.model_executor.kernels.linear.nvfp4.b12x import (
-    warmup_b12x_nvfp4_linear,
-)
 from vllm.model_executor.kernels.linear.scaled_mm.b12x_block import (
     warmup_b12x_block_fp8_linear,
 )
@@ -45,10 +36,7 @@ def b12x_warmup(worker: "Worker", cudagraph_capture_sizes: list[int]) -> None:
     }
     providers = (
         ("block-FP8", warmup_b12x_block_fp8_linear),
-        ("MXFP8", warmup_b12x_mxfp8_linear),
         ("tensor FP8", warmup_b12x_tensor_fp8_linear),
-        ("MXFP4", warmup_b12x_mxfp4_linear),
-        ("NVFP4", warmup_b12x_nvfp4_linear),
     )
     for name, warmup in providers:
         warmed = warmup(model, **warmup_kwargs)
