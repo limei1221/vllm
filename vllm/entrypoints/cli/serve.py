@@ -9,7 +9,6 @@ import uvloop
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.entrypoints.serve.utils.api_utils import VLLM_SUBCMD_PARSER_EPILOG
 from vllm.utils.argparse_utils import FlexibleArgumentParser
-from vllm.v1.metrics.prometheus import setup_multiprocess_prometheus
 
 DESCRIPTION = """Launch a local OpenAI-compatible API server serving DeepSeek
 V2/V3 completions over HTTP.
@@ -44,7 +43,6 @@ def cmd(args: argparse.Namespace) -> None:
     if (args.data_parallel_size_local or 0) > 1:
         from vllm.entrypoints.openai.dp_supervisor import run_dp_supervisor
 
-        setup_multiprocess_prometheus()
         run_dp_supervisor(args)
         return
 

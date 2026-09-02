@@ -43,12 +43,6 @@ from vllm.v1.engine.output_processor import OutputProcessor, RequestOutputCollec
 from vllm.v1.engine.parallel_sampling import ParentRequest
 from vllm.v1.executor import Executor
 from vllm.v1.fault_tolerance.utils import FaultToleranceRequest, FaultToleranceResult
-from vllm.v1.metrics.loggers import (
-    StatLoggerFactory,
-    StatLoggerManager,
-    load_stat_logger_plugin_factories,
-)
-from vllm.v1.metrics.prometheus import shutdown_prometheus
 from vllm.v1.metrics.stats import IterationStats
 
 logger = init_logger(__name__)
@@ -77,7 +71,6 @@ class AsyncLLM(EngineClient):
         usage_context: UsageContext = UsageContext.ENGINE_CONTEXT,
         log_requests: bool = True,
         start_engine_loop: bool = True,
-        stat_loggers: list[StatLoggerFactory] | None = None,
         aggregate_engine_logging: bool = False,
         client_addresses: dict[str, Any] | None = None,
         client_count: int = 1,
@@ -93,7 +86,6 @@ class AsyncLLM(EngineClient):
             usage_context: Usage context of the LLM.
             log_requests: Whether to log requests.
             start_engine_loop: Whether to start the engine loop.
-            stat_loggers: customized stat loggers for the engine.
                 If not provided, default stat loggers will be used.
                 PLEASE BE AWARE THAT STAT LOGGER IS NOT STABLE
                 IN V1, AND ITS BASE CLASS INTERFACE MIGHT CHANGE.
@@ -114,17 +106,7 @@ class AsyncLLM(EngineClient):
 
         self.log_requests = log_requests
 
-        custom_stat_loggers = list(stat_loggers or [])
-        custom_stat_loggers.extend(load_stat_logger_plugin_factories())
-
-        has_custom_loggers = bool(custom_stat_loggers)
-        self.log_stats = log_stats or has_custom_loggers
-        if not log_stats and has_custom_loggers:
-            logger.info(
-                "AsyncLLM created with log_stats=False, "
-                "but custom stat loggers were found; "
-                "enabling logging without default stat loggers."
-            )
+        self.log_stats = log_stats
 
         self.renderer = renderer = renderer_from_config(self.vllm_config)
 
@@ -148,19 +130,6 @@ class AsyncLLM(EngineClient):
             client_count=client_count,
             client_index=client_index,
         )
-
-        # Loggers.
-        self.logger_manager: StatLoggerManager | None = None
-        if self.log_stats:
-            self.logger_manager = StatLoggerManager(
-                vllm_config=vllm_config,
-                engine_idxs=self.engine_core.engine_ranks_managed,
-                custom_stat_loggers=custom_stat_loggers,
-                enable_default_loggers=log_stats,
-                client_count=client_count,
-                aggregate_engine_logging=aggregate_engine_logging,
-            )
-            self.logger_manager.log_engine_initialized()
 
         self._client_count = client_count
 
@@ -202,7 +171,6 @@ class AsyncLLM(EngineClient):
         vllm_config: VllmConfig,
         start_engine_loop: bool = True,
         usage_context: UsageContext = UsageContext.ENGINE_CONTEXT,
-        stat_loggers: list[StatLoggerFactory] | None = None,
         enable_log_requests: bool = False,
         aggregate_engine_logging: bool = False,
         disable_log_stats: bool = False,
@@ -215,7 +183,6 @@ class AsyncLLM(EngineClient):
             vllm_config=vllm_config,
             executor_class=Executor.get_class(vllm_config),
             start_engine_loop=start_engine_loop,
-            stat_loggers=stat_loggers,
             log_requests=enable_log_requests,
             log_stats=not disable_log_stats,
             aggregate_engine_logging=aggregate_engine_logging,
@@ -231,7 +198,6 @@ class AsyncLLM(EngineClient):
         engine_args: AsyncEngineArgs,
         start_engine_loop: bool = True,
         usage_context: UsageContext = UsageContext.ENGINE_CONTEXT,
-        stat_loggers: list[StatLoggerFactory] | None = None,
     ) -> "AsyncLLM":
         """Create an AsyncLLM from the EngineArgs."""
 
@@ -247,7 +213,6 @@ class AsyncLLM(EngineClient):
             log_stats=not engine_args.disable_log_stats,
             start_engine_loop=start_engine_loop,
             usage_context=usage_context,
-            stat_loggers=stat_loggers,
         )
 
     def __del__(self):
@@ -255,7 +220,6 @@ class AsyncLLM(EngineClient):
 
     def shutdown(self, timeout: float | None = None) -> None:
         """Shutdown, cleaning up the background proc and IPC."""
-        shutdown_prometheus()
 
         if renderer := getattr(self, "renderer", None):
             renderer.shutdown()
@@ -659,11 +623,6 @@ class AsyncLLM(EngineClient):
         engine_core = self.engine_core
         output_processor = self.output_processor
         log_stats = self.log_stats
-        # We use a mutable list for logger_manager so that it can be updated
-        # during elastic EP scaling (see scale_elastic_ep) without creating
-        # a circular reference via self.
-        self._logger_ref = [self.logger_manager]
-        logger_ref = self._logger_ref
         renderer = self.renderer
         # P0 multi-modal sender ("shadow") cache; None for text-only models.
         mm_processor_cache = renderer.mm_processor_cache
@@ -716,15 +675,6 @@ class AsyncLLM(EngineClient):
 
                     output_processor.update_scheduler_stats(outputs.scheduler_stats)
 
-                    # 4) Logging.
-                    # TODO(rob): make into a coroutine and launch it in
-                    # background thread once Prometheus overhead is non-trivial.
-                    if logger_ref[0]:
-                        logger_ref[0].record(
-                            engine_idx=outputs.engine_index,
-                            scheduler_stats=outputs.scheduler_stats,
-                            iteration_stats=iteration_stats,
-                        )
             except Exception as e:
                 logger.exception("AsyncLLM output_handler failed.")
                 output_processor.propagate_error(e)
@@ -915,8 +865,7 @@ class AsyncLLM(EngineClient):
         return self.observability_config.otlp_traces_endpoint is not None
 
     async def do_log_stats(self) -> None:
-        if self.logger_manager:
-            self.logger_manager.log()
+        return
 
     async def check_health(self) -> None:
         logger.debug("Called check_health.")
@@ -954,14 +903,8 @@ class AsyncLLM(EngineClient):
             await self.renderer.clear_mm_cache_async()
         await self.engine_core.sleep_async(level, mode)
 
-        if self.logger_manager is not None:
-            self.logger_manager.record_sleep_state(1, level)
-
     async def wake_up(self, tags: list[str] | None = None) -> None:
         await self.engine_core.wake_up_async(tags)
-
-        if self.logger_manager is not None:
-            self.logger_manager.record_sleep_state(0, 0)
 
     async def checkpoint_prepare(self) -> None:
         await self.collective_rpc("checkpoint_prepare")

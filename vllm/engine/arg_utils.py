@@ -458,9 +458,6 @@ class EngineArgs:
     cpu_distributed_timeout_seconds: int | None = (
         ParallelConfig.cpu_distributed_timeout_seconds
     )
-    numa_bind: bool = ParallelConfig.numa_bind
-    numa_bind_nodes: list[int] | None = ParallelConfig.numa_bind_nodes
-    numa_bind_cpus: list[str] | None = ParallelConfig.numa_bind_cpus
     device_ids: list[int | str] | None = None
     tensor_parallel_size: int = ParallelConfig.tensor_parallel_size
     prefill_context_parallel_size: int = ParallelConfig.prefill_context_parallel_size
@@ -589,8 +586,6 @@ class EngineArgs:
     enable_logging_iteration_details: bool = (
         ObservabilityConfig.enable_logging_iteration_details
     )
-    jit_monitor_mode: Literal["warn", "error"] = ObservabilityConfig.jit_monitor_mode
-    jit_monitor_verbose: bool = ObservabilityConfig.jit_monitor_verbose
     enable_mm_processor_stats: bool = ObservabilityConfig.enable_mm_processor_stats
     scheduling_policy: SchedulerPolicy = SchedulerConfig.policy
     scheduler_cls: str | type[object] | None = SchedulerConfig.scheduler_cls
@@ -946,13 +941,6 @@ class EngineArgs:
             "--cpu-distributed-timeout-seconds",
             **parallel_kwargs["cpu_distributed_timeout_seconds"],
         )
-        parallel_group.add_argument("--numa-bind", **parallel_kwargs["numa_bind"])
-        parallel_group.add_argument(
-            "--numa-bind-nodes", **parallel_kwargs["numa_bind_nodes"]
-        )
-        parallel_group.add_argument(
-            "--numa-bind-cpus", **parallel_kwargs["numa_bind_cpus"]
-        )
         parallel_group.add_argument(
             "--device-ids",
             type=lambda s: [
@@ -1249,14 +1237,6 @@ class EngineArgs:
         observability_group.add_argument(
             "--enable-logging-iteration-details",
             **observability_kwargs["enable_logging_iteration_details"],
-        )
-        observability_group.add_argument(
-            "--jit-monitor-mode",
-            **observability_kwargs["jit_monitor_mode"],
-        )
-        observability_group.add_argument(
-            "--jit-monitor-verbose",
-            **observability_kwargs["jit_monitor_verbose"],
         )
 
         # Scheduler arguments
@@ -1628,8 +1608,6 @@ class EngineArgs:
             enable_mfu_metrics=self.enable_mfu_metrics,
             enable_mm_processor_stats=self.enable_mm_processor_stats,
             enable_logging_iteration_details=self.enable_logging_iteration_details,
-            jit_monitor_mode=self.jit_monitor_mode,
-            jit_monitor_verbose=self.jit_monitor_verbose,
         )
 
     def create_engine_config(
@@ -1921,9 +1899,6 @@ class EngineArgs:
             assigned_physical_gpu_ids=self._resolve_device_ids(),
             enable_fault_tolerance=self.enable_fault_tolerance,
             fault_tolerance_config=self.fault_tolerance_config,
-            numa_bind=self.numa_bind,
-            numa_bind_nodes=self.numa_bind_nodes,
-            numa_bind_cpus=self.numa_bind_cpus,
         )
 
         speculative_config = self.create_speculative_config(

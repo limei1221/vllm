@@ -3,7 +3,7 @@
 
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import cloudpickle
 import torch.nn as nn
@@ -53,9 +53,6 @@ from vllm.v1.sample.logits_processor import LogitsProcessor
 
 from ..renderers import ChatParams
 from .offline_utils import _O, _R, OfflineInferenceMixin
-
-if TYPE_CHECKING:
-    from vllm.v1.metrics.reader import Metric
 
 logger = init_logger(__name__)
 
@@ -803,18 +800,6 @@ class LLM(OfflineInferenceMixin):
                 Use tags=["scheduling"] to resume from level 0 sleep.
         """
         self.llm_engine.wake_up(tags)
-
-    def get_metrics(self) -> list["Metric"]:
-        """Return a snapshot of aggregated metrics from Prometheus.
-
-        Returns:
-            A `MetricSnapshot` instance capturing the current state
-            of all aggregated metrics from Prometheus.
-
-        Note:
-            This method is only available with the V1 LLM engine.
-        """
-        return self.llm_engine.get_metrics()
 
     def init_weight_transfer_engine(
         self, request: WeightTransferInitRequest | dict

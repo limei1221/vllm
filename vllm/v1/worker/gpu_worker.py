@@ -772,15 +772,6 @@ class Worker(WorkerBase):
 
             trigger_inductor_lazy_init(self.device)
 
-        # All warmup is done — start monitoring for unexpected JIT
-        # compilations that would cause latency spikes during inference.
-        from vllm.utils.jit_monitor import activate as activate_jit_monitor
-
-        activate_jit_monitor(
-            mode=self.observability_config.jit_monitor_mode,
-            verbose=self.observability_config.jit_monitor_verbose,
-        )
-
         # Freeze the worker heap so the GC won't scan static objects
         # (model weights, KV caches, CUDA graphs) during inference.
         freeze_gc_heap()

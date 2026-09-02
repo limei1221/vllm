@@ -31,8 +31,6 @@ from vllm.v1.engine.input_processor import InputProcessor
 from vllm.v1.engine.output_processor import OutputProcessor
 from vllm.v1.engine.parallel_sampling import ParentRequest
 from vllm.v1.executor import Executor
-from vllm.v1.metrics.loggers import StatLoggerFactory, StatLoggerManager
-from vllm.v1.metrics.reader import Metric, get_metrics_snapshot
 from vllm.v1.metrics.stats import IterationStats
 from vllm.v1.utils import record_function_or_nullcontext
 from vllm.v1.worker.worker_base import WorkerBase
@@ -52,7 +50,6 @@ class LLMEngine:
         log_stats: bool,
         aggregate_engine_logging: bool = False,
         usage_context: UsageContext = UsageContext.ENGINE_CONTEXT,
-        stat_loggers: list[StatLoggerFactory] | None = None,
         multiprocess_mode: bool = False,
     ) -> None:
         self.vllm_config = vllm_config
@@ -97,16 +94,6 @@ class LLMEngine:
             log_stats=self.log_stats,
         )
 
-        self.logger_manager: StatLoggerManager | None = None
-        if self.log_stats:
-            self.logger_manager = StatLoggerManager(
-                vllm_config=vllm_config,
-                custom_stat_loggers=stat_loggers,
-                enable_default_loggers=log_stats,
-                aggregate_engine_logging=aggregate_engine_logging,
-            )
-            self.logger_manager.log_engine_initialized()
-
         if not multiprocess_mode:
             # for v0 compatibility
             self.model_executor = self.engine_core.engine_core.model_executor  # type: ignore
@@ -127,7 +114,6 @@ class LLMEngine:
         cls,
         vllm_config: VllmConfig,
         usage_context: UsageContext = UsageContext.ENGINE_CONTEXT,
-        stat_loggers: list[StatLoggerFactory] | None = None,
         disable_log_stats: bool = False,
     ) -> "LLMEngine":
         return cls(
@@ -135,7 +121,6 @@ class LLMEngine:
             executor_class=Executor.get_class(vllm_config),
             log_stats=(not disable_log_stats),
             usage_context=usage_context,
-            stat_loggers=stat_loggers,
             multiprocess_mode=envs.VLLM_ENABLE_V1_MULTIPROCESSING,
         )
 
@@ -144,7 +129,6 @@ class LLMEngine:
         cls,
         engine_args: EngineArgs,
         usage_context: UsageContext = UsageContext.ENGINE_CONTEXT,
-        stat_loggers: list[StatLoggerFactory] | None = None,
         enable_multiprocessing: bool = False,
     ) -> "LLMEngine":
         """Creates an LLM engine from the engine arguments."""
@@ -163,7 +147,6 @@ class LLMEngine:
             executor_class=executor_class,
             log_stats=not engine_args.disable_log_stats,
             usage_context=usage_context,
-            stat_loggers=stat_loggers,
             multiprocess_mode=enable_multiprocessing,
         )
 
@@ -303,14 +286,7 @@ class LLMEngine:
 
         # 4) Record stats
         with record_function_or_nullcontext("llm_engine step: record_stats"):
-            if self.logger_manager is not None and outputs.scheduler_stats is not None:
-                # Record even when this step produced no request outputs.
-                self.logger_manager.record(
-                    scheduler_stats=outputs.scheduler_stats,
-                    iteration_stats=iteration_stats,
-                )
-                if outputs.outputs:
-                    self.do_log_stats_with_interval()
+            pass
 
         return processed_outputs.request_outputs
 
@@ -344,21 +320,11 @@ class LLMEngine:
             self.renderer.clear_mm_cache()
         self.engine_core.sleep(level, mode)
 
-        if self.logger_manager is not None:
-            self.logger_manager.record_sleep_state(1, level)
-
     def wake_up(self, tags: list[str] | None = None):
         self.engine_core.wake_up(tags)
 
-        if self.logger_manager is not None:
-            self.logger_manager.record_sleep_state(0, 0)
-
     def is_sleeping(self) -> bool:
         return self.engine_core.is_sleeping()
-
-    def get_metrics(self) -> list[Metric]:
-        assert self.log_stats, "Stat logging disabled"
-        return get_metrics_snapshot()
 
     @property
     def tokenizer(self) -> TokenizerLike | None:
@@ -369,8 +335,7 @@ class LLMEngine:
 
     def do_log_stats(self) -> None:
         """Log stats if logging is enabled."""
-        if self.logger_manager:
-            self.logger_manager.log()
+        return
 
     def do_log_stats_with_interval(self) -> None:
         """Log stats when the time interval has passed."""
