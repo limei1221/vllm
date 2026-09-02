@@ -72,18 +72,9 @@ def _get_priority_backends(
     """
 
     _AVAILABLE_BACKENDS = [
-        Fp8MoeBackend.AITER,
-        Fp8MoeBackend.FLASHINFER_TRTLLM,
-        Fp8MoeBackend.FLASHINFER_CUTLASS,
         Fp8MoeBackend.DEEPGEMM,
-        Fp8MoeBackend.VLLM_CUTLASS,
         Fp8MoeBackend.TRITON,
         Fp8MoeBackend.BATCHED_DEEPGEMM,
-        Fp8MoeBackend.BATCHED_VLLM_CUTLASS,
-        Fp8MoeBackend.BATCHED_TRITON,
-        Fp8MoeBackend.XPU,
-        Fp8MoeBackend.CPU,
-        Fp8MoeBackend.HPC,
     ]
 
     def _move_to_front(backends: list[Fp8MoeBackend], backend: Fp8MoeBackend) -> None:
@@ -99,19 +90,7 @@ def _get_priority_backends(
         and activation_key == kFp8Dynamic128Sym
         and weight_key == kFp8Static128BlockSym
     ):
-        if moe_config.moe_parallel_config.ep_size > 1:
-            _move_to_front(_AVAILABLE_BACKENDS, Fp8MoeBackend.FLASHINFER_CUTLASS)
-        else:
-            _move_to_front(_AVAILABLE_BACKENDS, Fp8MoeBackend.TRITON)
-
-    if current_platform.is_xpu():
-        # XPU platform supports TritonExperts and XPUExpertsFp8,
-        # move XPU backend to the front.
-        _move_to_front(_AVAILABLE_BACKENDS, Fp8MoeBackend.XPU)
-
-    if current_platform.is_cpu():
-        # CPU platform uses FP8 W8A16 fused MoE kernel.
-        _move_to_front(_AVAILABLE_BACKENDS, Fp8MoeBackend.CPU)
+        _move_to_front(_AVAILABLE_BACKENDS, Fp8MoeBackend.TRITON)
 
     return _AVAILABLE_BACKENDS
 
@@ -119,22 +98,7 @@ def _get_priority_backends(
 def backend_to_kernel_cls(
     backend: Fp8MoeBackend,
 ) -> list[type[mk.FusedMoEExperts]]:
-    if backend == Fp8MoeBackend.FLASHINFER_TRTLLM:
-        from vllm.model_executor.layers.fused_moe.experts.trtllm_fp8_moe import (  # noqa: E501
-            TrtLlmFp8ExpertsModular,
-            TrtLlmFp8ExpertsMonolithic,
-        )
-
-        return [TrtLlmFp8ExpertsMonolithic, TrtLlmFp8ExpertsModular]
-
-    elif backend == Fp8MoeBackend.FLASHINFER_CUTLASS:
-        from vllm.model_executor.layers.fused_moe.experts.flashinfer_cutlass_moe import (  # noqa: E501
-            FlashInferExperts,
-        )
-
-        return [FlashInferExperts]
-
-    elif backend == Fp8MoeBackend.DEEPGEMM:
+    if backend == Fp8MoeBackend.DEEPGEMM:
         from vllm.model_executor.layers.fused_moe.experts.triton_deep_gemm_moe import (
             TritonOrDeepGemmExperts,
         )
@@ -155,57 +119,6 @@ def backend_to_kernel_cls(
 
         return [TritonExperts]
 
-    elif backend == Fp8MoeBackend.BATCHED_TRITON:
-        from vllm.model_executor.layers.fused_moe.experts.fused_batched_moe import (
-            BatchedTritonExperts,
-        )
-
-        return [BatchedTritonExperts]
-
-    elif backend == Fp8MoeBackend.AITER:
-        from vllm.model_executor.layers.fused_moe.experts.rocm_aiter_moe import (
-            AiterExperts,
-        )
-
-        return [AiterExperts]
-
-    elif backend == Fp8MoeBackend.VLLM_CUTLASS:
-        from vllm.model_executor.layers.fused_moe.experts.triton_cutlass_moe import (
-            TritonOrCutlassExperts,
-        )
-
-        return [TritonOrCutlassExperts]
-
-    elif backend == Fp8MoeBackend.BATCHED_VLLM_CUTLASS:
-        from vllm.model_executor.layers.fused_moe.experts.cutlass_moe import (
-            CutlassBatchedExpertsFp8,
-        )
-
-        return [CutlassBatchedExpertsFp8]
-
-    elif backend == Fp8MoeBackend.XPU:
-        from vllm.model_executor.layers.fused_moe.experts.xpu_moe import (
-            XPUExpertsBlockFp8,
-            XPUExpertsFp8,
-            XPUExpertsMxFp8,
-        )
-
-        return [XPUExpertsFp8, XPUExpertsMxFp8, XPUExpertsBlockFp8]
-
-    elif backend == Fp8MoeBackend.CPU:
-        from vllm.model_executor.layers.fused_moe.experts.cpu_moe import (
-            CPUExpertsFp8,
-        )
-
-        return [CPUExpertsFp8]
-
-    elif backend == Fp8MoeBackend.HPC:
-        from vllm.model_executor.layers.fused_moe.hpc_moe import (
-            HPCExperts,
-        )
-
-        return [HPCExperts]
-
     else:
         raise ValueError(f"Unknown FP8 MoE backend: {backend.value}")
 
@@ -215,11 +128,6 @@ def map_fp8_backend(runner_backend: MoEBackend) -> Fp8MoeBackend:
     mapping = {
         "triton": Fp8MoeBackend.TRITON,
         "deep_gemm": Fp8MoeBackend.DEEPGEMM,
-        "cutlass": Fp8MoeBackend.VLLM_CUTLASS,
-        "flashinfer_trtllm": Fp8MoeBackend.FLASHINFER_TRTLLM,
-        "flashinfer_cutlass": Fp8MoeBackend.FLASHINFER_CUTLASS,
-        "aiter": Fp8MoeBackend.AITER,
-        "hpc": Fp8MoeBackend.HPC,
     }
     if backend := mapping.get(runner_backend):
         return backend
